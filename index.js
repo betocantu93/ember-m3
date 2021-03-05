@@ -1,12 +1,19 @@
 /* eslint-env node */
 'use strict';
+
 const Funnel = require('broccoli-funnel');
 const getDebugMacros = require('./src/debug-macros').debugMacros;
 
 const VersionChecker = require('ember-cli-version-checker');
 
-function assertValidEmberData(addon) {
-  let checker = VersionChecker.forProject(addon.project);
+const CHECKED_PROJECT = new WeakSet();
+
+function assertValidEmberData(project) {
+  if (CHECKED_PROJECT.has(project)) {
+    return;
+  }
+
+  let checker = VersionChecker.forProject(project);
 
   // full ember-data brings store and model starting in 3.16
   // so we do not need to check for full ember-data, just the specific packages
@@ -20,6 +27,8 @@ function assertValidEmberData(addon) {
   check.assert(
     '[ember-m3] requires either "ember-data" be installed (which brings the below packages) or at least the following versions of them.'
   );
+
+  CHECKED_PROJECT.add(project);
 }
 
 module.exports = {
@@ -28,7 +37,7 @@ module.exports = {
   included() {
     this._super.included.call(this, ...arguments);
 
-    assertValidEmberData(this);
+    assertValidEmberData(this.project);
 
     this.configureBabelOptions();
   },

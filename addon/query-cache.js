@@ -18,8 +18,8 @@ export default class QueryCache {
   constructor({ store }) {
     this._store = store;
     this._recordArrayManager = this._store.recordArrayManager;
-    this._queryCache = new Object(null);
-    this._reverseQueryCache = new Object(null);
+    this._queryCache = Object.create(null);
+    this._reverseQueryCache = Object.create(null);
     this.__adapter = null;
     this.__serializer = null;
   }
@@ -59,9 +59,15 @@ export default class QueryCache {
             cacheKey,
             'queryURL'
           );
-          if (payload === null || payload === undefined) {
+          if (
+            payload === null ||
+            payload === undefined ||
+            typeof payload !== 'object' ||
+            Array.isArray(payload)
+          ) {
             return payload;
           }
+
           let result = this._createResult(payload, { url, params, method, cacheKey }, array);
           // Add result to reverseCache.
           if (cacheKey) {
