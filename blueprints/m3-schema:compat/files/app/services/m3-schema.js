@@ -1,4 +1,6 @@
 import DefaultSchema from 'ember-m3/services/m3-schema';
+import { readOnly } from '@ember/object/computed';
+import { defineProperty, get } from '@ember/object';
 
 export default class M3SchemaService extends DefaultSchema {
   /**
@@ -35,9 +37,36 @@ export default class M3SchemaService extends DefaultSchema {
    * @param {M3SchemaInterface} schemaInterface
    * @returns {Object}
    */
-  // computeAttribute(key, value, modelName, schemaInterface) {
-  //  return this._super(...arguments);
-  // },
+  computeAttribute(key, modelName, schemaInterface, _schema, record) {
+    //Maybe you want to ignore certain attrs names
+    if (!this.isAttributeIncluded(modelName, key)) {
+      return;
+    }
+
+    const rawValue = schemaInterface.getAttr(key);
+
+    const transformedValue = this.transformValue(modelName, key, rawValue);
+
+    //Defaulting and alias logic, but basically you do anything here.
+    if (transformedValue === undefined) {
+      let attrAlias = this.getAttributeAlias(modelName, key);
+      if (attrAlias) {
+        const cp = readOnly(attrAlias);
+        defineProperty(record, key, cp);
+        return get(record, key);
+      }
+
+      const defaultValue = this.getDefaultValue(modelName, key);
+
+      // If default value is not defined, resolve the key for reference
+      if (defaultValue !== undefined) {
+        return defaultValue;
+      }
+    }
+
+    return transformedValue;
+  }
+
   /**
    * Whether or not ember-m3 should handle this `modelName`.
    *
@@ -46,7 +75,28 @@ export default class M3SchemaService extends DefaultSchema {
    */
   // includesModel(modelName) {
   //   return false;
-  // },
+  // }
+
+  /**
+   * Update the RecordData with raw value instead of resolved value
+   *
+   * @param {string} modelName
+   * @param {string} attrName
+   * @param {Object} value
+   * @param {M3SchemaInterface} schemaInterface
+   */
+  setAttribute(modelName, attrName, value, schemaInterface) {
+    if (!this.isAttributeIncluded(modelName, attrName)) {
+      throw new Error(`Cannot set a non-whitelisted property ${attrName} on type ${modelName}`);
+    }
+    if (this.getAttributeAlias(this._modelName, attrName)) {
+      throw new Error(
+        `You tried to set '${attrName}' to '${value}', but '${attrName}' is an alias in '${modelName}' and aliases are read-only`
+      );
+    } else {
+      schemaInterface.setAttr(attrName, value);
+    }
+  }
 
   isAttributeIncluded(modelName, attrName) {
     let whitelist = this._modelSchemaProperty(modelName, 'attributes');

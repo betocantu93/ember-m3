@@ -113,28 +113,13 @@ export default class SchemaManager extends Service {
     return result;
   }
 
+  //This is still used by notifyPropertyChange in Model class
   isAttributeIncluded(modelName, attrName) {
     let schema = this.get('schema');
     if (schema.isAttributeIncluded && typeof schema.isAttributeIncluded === 'function') {
       return schema.isAttributeIncluded(modelName, attrName);
     }
     return true;
-  }
-
-  //implicit undefined return, thus no default value
-  getDefaultValue(modelName, keyName) {
-    let schema = this.get('schema');
-    if (schema.getDefaultValue && typeof schema.getDefaultValue === 'function') {
-      return this.get('schema').getDefaultValue(modelName, keyName);
-    }
-  }
-
-  //implicit undefined return, thus no default value
-  getAttributeAlias(modelName, attrName) {
-    let schema = this.get('schema');
-    if (schema.getAttributeAlias && typeof schema.getAttributeAlias === 'function') {
-      return schema.getAttributeAlias(modelName, attrName);
-    }
   }
 
   // TODO: probably need a better function name, e.g. computeAttributeNames

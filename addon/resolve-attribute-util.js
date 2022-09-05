@@ -124,13 +124,14 @@ export function resolveRecordArray(store, record, key, references) {
  * 3. Single nested model -> EmbeddedMegaMorphicModel
  * 4. Array of nested models -> array of EmbeddedMegaMorphicModel
  */
-export function resolveValue(key, value, modelName, store, schema, record, parentIdx) {
+export function resolveValue(key, modelName, store, schema, record, parentIdx) {
   const recordData = recordDataFor(record);
+  let value = recordData.getAttr(key);
   const schemaInterface = recordData.schemaInterface;
 
   let computedValue;
   if (schema.useComputeAttribute()) {
-    computedValue = computeAttribute(key, value, modelName, schemaInterface, schema);
+    computedValue = computeAttribute(key, modelName, schemaInterface, schema, record);
   } else {
     // TODO remove this if branch once we remove support for old compute hooks
     // We invoke the old hooks and mark the results with the new apis

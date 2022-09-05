@@ -4,7 +4,6 @@
 import EmberObject, { computed, get, set, defineProperty } from '@ember/object';
 import { isArray } from '@ember/array';
 import { assert, warn, deprecate } from '@ember/debug';
-import { readOnly } from '@ember/object/computed';
 import { recordDataToRecordMap } from './utils/caches';
 
 import { recordDataFor } from './-private';
@@ -534,31 +533,9 @@ export default class MegamorphicModel extends EmberObject {
     let returnValue;
     if (key in this._cache) {
       returnValue = this._cache[key];
-    } else if (!this._schema.isAttributeIncluded(this._modelName, key)) {
-      return;
     } else {
-      let rawValue = recordDataFor(this).getAttr(key);
-      // TODO IGOR DAVID
-      // figure out if any of the below should be moved into recordData
-      if (rawValue === undefined) {
-        let attrAlias = this._schema.getAttributeAlias(this._modelName, key);
-        if (attrAlias) {
-          const cp = readOnly(attrAlias);
-          defineProperty(this, key, cp);
-          return get(this, key);
-        }
-
-        let defaultValue = this._schema.getDefaultValue(this._modelName, key);
-
-        // If default value is not defined, resolve the key for reference
-        if (defaultValue !== undefined) {
-          returnValue = this._cache[key] = defaultValue;
-        }
-      }
-      if (returnValue === undefined) {
-        returnValue = resolveValue(key, rawValue, this._modelName, this._store, this._schema, this);
-        this._cache[key] = returnValue;
-      }
+      returnValue = resolveValue(key, this._modelName, this._store, this._schema, this);
+      this._cache[key] = returnValue;
     }
     return returnValue;
   }
@@ -598,16 +575,6 @@ export default class MegamorphicModel extends EmberObject {
 
     if (DEBUG) {
       assertNoChanges(this._store);
-    }
-
-    if (!this._schema.isAttributeIncluded(this._modelName, key)) {
-      throw new Error(`Cannot set a non-whitelisted property ${key} on type ${this._modelName}`);
-    }
-
-    if (this._schema.getAttributeAlias(this._modelName, key)) {
-      throw new Error(
-        `You tried to set '${key}' to '${value}', but '${key}' is an alias in '${this._modelName}' and aliases are read-only`
-      );
     }
 
     if (isArray(value)) {
