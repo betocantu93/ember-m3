@@ -57,7 +57,7 @@ if (!CUSTOM_MODEL_CLASS) {
 // takes in a single computedValue returned by schema hooks and resolves it as either
 // a reference or a nestedModel
 
-function resolveSingleValue(computedValue, key, store, record, recordData, parentIdx) {
+function resolveSingleValue(computedValue, key, store, record, recordData, parentIdx, schemaType) {
   // we received a resolved record and need to transfer it to the new record data
   if (computedValue instanceof EmbeddedMegamorphicModel) {
     // transfer ownership to the new RecordData
@@ -65,8 +65,7 @@ function resolveSingleValue(computedValue, key, store, record, recordData, paren
     return computedValue;
   }
 
-  let valueType = schemaTypesInfo.get(computedValue);
-  if (valueType === REFERENCE) {
+  if (schemaType === REFERENCE) {
     let reference = computedValue;
     let { id } = reference;
     if (reference.type === null) {
@@ -85,7 +84,7 @@ function resolveSingleValue(computedValue, key, store, record, recordData, paren
         ? store.peekRecord(reference.type, reference.id)
         : null;
     }
-  } else if (valueType === NESTED) {
+  } else if (schemaType === NESTED) {
     return createNestedModel(store, record, recordData, key, computedValue, parentIdx);
   } else {
     return computedValue;
@@ -166,7 +165,14 @@ export function resolveValue(key, value, modelName, store, schema, record, paren
         let content = value.map((v, i) =>
           transferOrResolveValue(store, schema, record, recordData, modelName, key, v, i)
         );
-        return resolveManagedArray(content, key, value, modelName, store, schema, record);
+        let array = resolveManagedArray(content, key, value, modelName, store, schema, record);
+        if (!CUSTOM_MODEL_CLASS) {
+          array._setInternalModels(
+            content.map((c) => c._internalModel || c),
+            false
+          );
+        }
+        return array;
       }
     }
   }
@@ -174,18 +180,29 @@ export function resolveValue(key, value, modelName, store, schema, record, paren
   let valueType = schemaTypesInfo.get(computedValue);
 
   if (valueType === REFERENCE || valueType === NESTED) {
-    return resolveSingleValue(computedValue, key, store, record, recordData, parentIdx);
+    return resolveSingleValue(computedValue, key, store, record, recordData, parentIdx, valueType);
   } else if (valueType === MANAGED_ARRAY) {
     if (schemaTypesInfo.get(computedValue[0]) === REFERENCE) {
       return resolveRecordArray(store, record, key, computedValue);
     } else {
       let content = computedValue.map((v, i) =>
-        resolveSingleValue(v, key, store, record, recordData, i)
+        resolveSingleValue(v, key, store, record, recordData, i, schemaTypesInfo.get(v))
       );
-      return resolveManagedArray(content, key, value, modelName, store, schema, record);
+      let array = resolveManagedArray(content, key, value, modelName, store, schema, record);
+      if (!CUSTOM_MODEL_CLASS) {
+        array._setInternalModels(
+          content.map((c, i) => {
+            return schemaTypesInfo.get(computedValue[i]) === REFERENCE ? c._internalModel : c;
+          }),
+          false
+        );
+      }
+      return array;
     }
   } else if (Array.isArray(computedValue)) {
-    return computedValue.map((v, i) => resolveSingleValue(v, key, store, record, recordData, i));
+    return computedValue.map((v, i) =>
+      resolveSingleValue(v, key, store, record, recordData, i, schemaTypesInfo.get(v))
+    );
   } else if (computedValue) {
     return computedValue;
   } else {
@@ -215,10 +232,6 @@ function resolveManagedArray(content, key, value, modelName, store, schema, reco
       model: record,
       record,
     });
-    array._setInternalModels(
-      content.map((c) => c._internalModel || c),
-      false
-    );
     return array;
   }
 }
@@ -277,10 +290,21 @@ function createNestedModel(store, record, recordData, key, nestedValue, parentId
     internalModel.record = nestedModel;
     nestedRecordData = recordDataFor(internalModel);
   }
-  if (
-    !recordData.getServerAttr ||
-    (recordData.getServerAttr(key) !== null && recordData.getServerAttr(key) !== undefined)
-  ) {
+
+  // Detect whether the nested model itself is replaced or new, e.g. from a user having done
+  // `model.set('nestedModel', { ...newAttributes });`
+  let createDirtyNestedModel =
+    recordData.__attributes && Object.keys(recordData.__attributes).indexOf(key) >= 0;
+
+  // Detect whether creating model from server payload
+  createDirtyNestedModel =
+    createDirtyNestedModel && recordData.getServerAttr && !recordData.getServerAttr(key);
+
+  if (createDirtyNestedModel) {
+    Object.keys(nestedValue.attributes).forEach((key) => {
+      nestedRecordData.setAttr(key, nestedValue.attributes[key], true);
+    });
+  } else {
     nestedRecordData.pushData(
       {
         attributes: nestedValue.attributes,
@@ -289,10 +313,6 @@ function createNestedModel(store, record, recordData, key, nestedValue, parentId
       false,
       true
     );
-  } else {
-    Object.keys(nestedValue.attributes).forEach((key) => {
-      nestedRecordData.setAttr(key, nestedValue.attributes[key], true);
-    });
   }
 
   return nestedModel;

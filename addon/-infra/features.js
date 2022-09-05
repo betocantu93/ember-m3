@@ -20,9 +20,4 @@ function dataFlagState(flagName) {
   return value || false;
 }
 
-function m3FlagState(flagName) {
-  return window.M3ENV?.FEATURES?.[flagName];
-}
-
 export const CUSTOM_MODEL_CLASS = dataFlagState('CUSTOM_MODEL_CLASS');
-export const PROXY_MODEL_CLASS = m3FlagState('PROXY_MODEL_CLASS');

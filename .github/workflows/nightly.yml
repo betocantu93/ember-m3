@@ -5,6 +5,7 @@ on:
   schedule:
     # minute hour day-of-month month day-of-week
     - cron: '0 14 * * *' # 1400 UTC / 0600 PT
+  workflow_dispatch:
 
 jobs:
   test-floating-deps:
@@ -14,14 +15,14 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v1
         with:
-          node-version: '10.x' # min node version
+          node-version: '12.x' # min node version
       - name: yarn install
         run: yarn install --no-lockfile
       - name: test
         run: yarn test
 
   test-canaries:
-    name: 't:' # rely on matrix for most of name
+    name: "t:${{matrix.try-scenario}}"
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -31,17 +32,27 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v1
         with:
-          node-version: '10.x'
+          node-version: '12.x'
       - name: yarn install
         run: yarn --frozen-lockfile --install
       - name: try ${{matrix.try-scenario}}
         run: yarn run ember try:one ${{matrix.try-scenario}}
       - name: create issue
         if: failure()
-        # TODO: can't run via yarn script due to bug in nyx@0.2.0
-        run: node ./node_modules/.bin/nyx report-failure
+        run: "yarn nyx report-failure --owner hjdivad --repo ember-m3 --run-id ${{github.run_id}}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUN_ID: ${{ github.run_id }}
-          OWNER: hjdivad
-          REPO: ember-m3
+
+  test-feature-flags:
+    name: feature flags
+    needs: [lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-node@v1
+        with:
+          node-version: '12.x' # min node version
+      - name: yarn install
+        run: yarn --frozen-lockfile --install
+      - name: test:feature-flags
+        run: yarn run ember try:one ember-data-packages-canary --- ember test --query enableoptionalfeatures

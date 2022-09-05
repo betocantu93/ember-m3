@@ -1,6 +1,7 @@
 import Service from '@ember/service';
 import { isArray } from '@ember/array';
 import { isResolvedValue as _isResolvedValue } from '../utils/resolve';
+import isM3Array from '../utils/is-m3-array';
 
 export default class DefaultSchema extends Service {
   computeAttribute(/* key, value, modelName, schemaInterface */) {}
@@ -98,8 +99,20 @@ export default class DefaultSchema extends Service {
         //
         // empty native arrays are treated as unresolved as this is the primary
         // way of setting arrays of new nested models
-        return !Array.isArray(value);
+        return !Array.isArray(value) || isM3Array(value);
       }
     }
+  }
+
+  /**
+   * Default return value to false. This is for child classes to override.
+   *
+   * `modelName` parameter is passed to this but removed to pass eslint linting rule
+   *
+   * @param {string} modelName - Name of model to determine if `errors` property in the payload should be used
+   * @returns {boolean}
+   */
+  useUnderlyingErrorsValue() {
+    return false;
   }
 }

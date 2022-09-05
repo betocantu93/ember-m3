@@ -1,3 +1,345 @@
+
+
+
+
+
+
+
+
+
+## v5.0.7 (2022-06-28)
+
+#### :bug: Bug Fix
+* [#1633](https://github.com/hjdivad/ember-m3/pull/1633) Update Ember-Inspector Compatibility ([@pete-the-pete](https://github.com/pete-the-pete))
+* [#1568](https://github.com/hjdivad/ember-m3/pull/1568) Don't deprecate setting symbols ([@runspired](https://github.com/runspired))
+
+#### :memo: Documentation
+* [#1626](https://github.com/hjdivad/ember-m3/pull/1626) A test case to show how to use a symbol as an attribute name ([@larry-x-yu](https://github.com/larry-x-yu))
+
+#### :house: Internal
+* [#1571](https://github.com/hjdivad/ember-m3/pull/1571) Fix typo in test description ([@mrloop](https://github.com/mrloop))
+
+#### Committers: 4
+- Chris Thoburn ([@runspired](https://github.com/runspired))
+- Ewan McDougall ([@mrloop](https://github.com/mrloop))
+- Pete ([@pete-the-pete](https://github.com/pete-the-pete))
+- [@larry-x-yu](https://github.com/larry-x-yu)
+
+
+## v5.0.6 (2022-05-10)
+
+#### :bug: Bug Fix
+* [#1612](https://github.com/hjdivad/ember-m3/pull/1612) Fixed a bug caused by using '&&=' syntax ([@larry-x-yu](https://github.com/larry-x-yu))
+
+#### Committers: 1
+- [@larry-x-yu](https://github.com/larry-x-yu)
+
+
+## v5.0.5 (2022-05-10)
+
+#### :bug: Bug Fix
+* [#1601](https://github.com/hjdivad/ember-m3/pull/1601) Fix lazy nested model creation for newly written attributes ([@larry-x-yu](https://github.com/larry-x-yu))
+
+#### :house: Internal
+* [#1607](https://github.com/hjdivad/ember-m3/pull/1607) Move feature-flags from CI to nightly ([@hjdivad](https://github.com/hjdivad))
+
+#### Committers: 2
+- David J. Hamilton ([@hjdivad](https://github.com/hjdivad))
+- [@larry-x-yu](https://github.com/larry-x-yu)
+
+## v5.0.4 (2022-01-12)
+
+#### :bug: Bug Fix
+* [#1534](https://github.com/hjdivad/ember-m3/pull/1534) [bugfix] ensure that errors can be updated when using useUnderlyingErrorsValue ([@gabrielcsapo](https://github.com/gabrielcsapo))
+
+#### :house: Internal
+* [#1531](https://github.com/hjdivad/ember-m3/pull/1531) Remove ember-cli-shims ([@rwjblue](https://github.com/rwjblue))
+
+#### Committers: 3
+- David J. Hamilton ([@hjdivad](https://github.com/hjdivad))
+- Gabriel Csapo ([@gabrielcsapo](https://github.com/gabrielcsapo))
+- Robert Jackson ([@rwjblue](https://github.com/rwjblue))
+
+
+## v5.0.3 (2021-11-01)
+
+#### :bug: Bug Fix
+* [#1403](https://github.com/hjdivad/ember-m3/pull/1403) Fix for tracked properties updating when using m3 native properties ([@igorT](https://github.com/igorT))
+
+#### Committers: 1
+- Igor Terzic ([@igorT](https://github.com/igorT))
+
+
+## v5.0.2 (2021-09-29)
+
+#### :bug: Bug Fix
+* [#1376](https://github.com/hjdivad/ember-m3/pull/1376) Fix native property access in production ([@igorT](https://github.com/igorT))
+
+#### Committers: 1
+- Igor Terzic ([@igorT](https://github.com/igorT))
+
+
+## v5.0.1 (2021-09-09)
+
+#### :rocket: Enhancement
+* [#1337](https://github.com/hjdivad/ember-m3/pull/1337) Add support for Node v16 ([@igorT](https://github.com/igorT))
+
+#### Committers: 1
+- Igor Terzic ([@igorT](https://github.com/igorT))
+
+
+## v5.0.0 (2021-09-02)
+
+#### :boom: Breaking Change
+* [#1299](https://github.com/hjdivad/ember-m3/pull/1299) `Array.isArray(value)` should not be used with M3 Arrays and will be returning `true` in the future.
+
+With Ember Data versions `3.28.0` and above M3 Arrays can be used as native JS arrays other than in IE11 which doesn't support proxies. For example, instead of having to do `m3Array.objectAt(0)` you can now do `m3Array[0]`. 
+
+However, because M3 Arrays are now proxying JavaScript native arrays, the return value of `Array.isArray(m3Array)` will change to now be `true`,
+so it is no longer safe to rely on `Array.isArray` to distinguish between native and m3 arrays. If you need to detect an M3 Array we have now provided a utility method `isM3Array`:
+
+```js
+import isM3Array from 'ember-m3/utils/is-m3-array'
+
+// To replicate old behavior of `Array.isArray(value)` you would need to do:
+let isJSArray = Array.isArray(value) && !isM3Array(value)
+```
+
+#### :rocket: Enhancement
+* [#1300](https://github.com/hjdivad/ember-m3/pull/1300) Do not emit array change events when app is being destroyed ([@igorT](https://github.com/igorT))
+* [#1301](https://github.com/hjdivad/ember-m3/pull/1301) Sync projections and base model deleted state with CUSTOM_MODEL_CLASS ([@igorT](https://github.com/igorT))
+* [#1238](https://github.com/hjdivad/ember-m3/pull/1238) Add array native access ([@igorT](https://github.com/igorT))
+* [#1232](https://github.com/hjdivad/ember-m3/pull/1232) Add native property access for models ([@igorT](https://github.com/igorT))
+
+#### :bug: Bug Fix
+* [#1315](https://github.com/hjdivad/ember-m3/pull/1315) Add IE testing and guard proxies when they are not present ([@igorT](https://github.com/igorT))
+* [#1298](https://github.com/hjdivad/ember-m3/pull/1298) Do not needlessly access `isDirty` ([@igorT](https://github.com/igorT))
+* [#1299](https://github.com/hjdivad/ember-m3/pull/1299) Switch m3 array proxies to proxy [] insted of BaseRecordArray ([@igorT](https://github.com/igorT))
+* [#1301](https://github.com/hjdivad/ember-m3/pull/1301) Sync projections and base model deleted state with CUSTOM_MODEL_CLASS ([@igorT](https://github.com/igorT))
+* [#1295](https://github.com/hjdivad/ember-m3/pull/1295) Fix isDeleted rollbackAttributes for Custom Model Class ([@igorT](https://github.com/igorT))
+* [#1241](https://github.com/hjdivad/ember-m3/pull/1241) fix: skip this.errors.remove if useUnderlyingErrorsValue ([@spham92](https://github.com/spham92))
+* [#1243](https://github.com/hjdivad/ember-m3/pull/1243) Fix isError and adapterError with CUSTOM_MODEL_CLASSES ([@igorT](https://github.com/igorT))
+* [#1240](https://github.com/hjdivad/ember-m3/pull/1240) Fix for projected models resolving in projected arrays, when CUSTOM_MODEL_CLASS is on ([@igorT](https://github.com/igorT))
+* [#1248](https://github.com/hjdivad/ember-m3/pull/1248) Add 'for' and 'since' to nativeProperties deprecation ([@igorT](https://github.com/igorT))
+* [#1249](https://github.com/hjdivad/ember-m3/pull/1249) Fix isSaving for embedded records when CUSTOM MODEL CLASS is on ([@igorT](https://github.com/igorT))
+* [#1242](https://github.com/hjdivad/ember-m3/pull/1242) Fix isDirty for inflight records and set _topModel to the proxy value ([@igorT](https://github.com/igorT))
+* [#1247](https://github.com/hjdivad/ember-m3/pull/1247) Don't trigger dot access deprecations when useNativeProperties hook isn't defined ([@igorT](https://github.com/igorT))
+
+#### :memo: Documentation
+* [#1252](https://github.com/hjdivad/ember-m3/pull/1252) Add documentation for native property access ([@igorT](https://github.com/igorT))
+
+#### :house: Internal
+* [#1296](https://github.com/hjdivad/ember-m3/pull/1296) Convert state tests to use native property access ([@igorT](https://github.com/igorT))
+* [#1251](https://github.com/hjdivad/ember-m3/pull/1251) Cleanup the invalid errors test ([@igorT](https://github.com/igorT))
+
+#### Committers: 2
+- Igor Terzic ([@igorT](https://github.com/igorT))
+- Steven Pham ([@spham92](https://github.com/spham92))
+
+
+## v4.2.0 (2021-08-02)
+
+#### :rocket: Enhancement
+* [#1238](https://github.com/hjdivad/ember-m3/pull/1238) Add nattive property access for arrays ([@igorT](https://github.com/igorT))
+* [#1232](https://github.com/hjdivad/ember-m3/pull/1232) Add native property access for models ([@igorT](https://github.com/igorT))
+
+#### :bug: Bug Fix
+* [#1241](https://github.com/hjdivad/ember-m3/pull/1241) fix: skip this.errors.remove if useUnderlyingErrorsValue ([@spham92](https://github.com/spham92))
+* [#1243](https://github.com/hjdivad/ember-m3/pull/1243) Fix isError and adapterError with CUSTOM_MODEL_CLASSES ([@igorT](https://github.com/igorT))
+* [#1240](https://github.com/hjdivad/ember-m3/pull/1240) Fix for projected models resolving in projected arrays, when CUSTOM_MODEL_CLASS is on ([@igorT](https://github.com/igorT))
+* [#1249](https://github.com/hjdivad/ember-m3/pull/1249) Fix isSaving for embedded records when CUSTOM MODEL CLASS is on ([@igorT](https://github.com/igorT))
+* [#1242](https://github.com/hjdivad/ember-m3/pull/1242) Fix isDirty for inflight records and set _topModel to the proxy value ([@igorT](https://github.com/igorT))
+
+#### :memo: Documentation
+* [#1252](https://github.com/hjdivad/ember-m3/pull/1252) Add documentation for native property access ([@igorT](https://github.com/igorT))
+
+#### :house: Internal
+* [#1251](https://github.com/hjdivad/ember-m3/pull/1251) Cleanup the invalid errors test ([@igorT](https://github.com/igorT))
+
+#### Committers: 2
+- Igor Terzic ([@igorT](https://github.com/igorT))
+- Steven Pham ([@spham92](https://github.com/spham92))
+
+
+## v4.1.3 (2021-07-27)
+
+#### :bug: Bug Fix
+* [#1226](https://github.com/hjdivad/ember-m3/pull/1226) Fix array resolving for non references when CUSTOM_MODEL_CLASS is off ([@igorT](https://github.com/igorT))
+* [#1169](https://github.com/hjdivad/ember-m3/pull/1169) Custom Model Classes: Ensure isDirty for embedded records doesn't recursively loop ([@igorT](https://github.com/igorT))
+* [#1175](https://github.com/hjdivad/ember-m3/pull/1175) Custom Model Classs: Fix isLoading and isLoaded flags on model ([@igorT](https://github.com/igorT))
+
+#### :house: Internal
+* [#1184](https://github.com/hjdivad/ember-m3/pull/1184) Use  operator instead of property access for existence checks ([@igorT](https://github.com/igorT))
+* [#1183](https://github.com/hjdivad/ember-m3/pull/1183) Avoid repeatedly looking up the schema type when resolving ([@igorT](https://github.com/igorT))
+* [#1179](https://github.com/hjdivad/ember-m3/pull/1179) Make perfomance testing app more robust to slow tests ([@igorT](https://github.com/igorT))
+* [#1172](https://github.com/hjdivad/ember-m3/pull/1172) Upgrade ember-lts versions to actual latest and latest-1 ([@igorT](https://github.com/igorT))
+
+#### Committers: 1
+- Igor Terzic ([@igorT](https://github.com/igorT))
+
+
+## v4.1.2 (2021-07-02)
+
+#### :bug: Bug Fix
+* [#1180](https://github.com/hjdivad/ember-m3/pull/1180) Fix feature flag infra code for node ([@igorT](https://github.com/igorT))
+
+#### :house: Internal
+* [#1174](https://github.com/hjdivad/ember-m3/pull/1174) Make perfomance testing app more robust to slow tests ([@igorT](https://github.com/igorT))
+
+#### Committers: 1
+- Igor Terzic ([@igorT](https://github.com/igorT))
+
+
+## v4.1.1 (2021-06-30)
+
+#### :bug: Bug Fix
+* [#1167](https://github.com/hjdivad/ember-m3/pull/1167) Allow custom ObjectProxy instances to be wrapped around an M3Model instance  ([@igorT](https://github.com/igorT))
+
+#### :house: Internal
+* [#1157](https://github.com/hjdivad/ember-m3/pull/1157) Add CI workflow for running TracerBench ([@igorT](https://github.com/igorT))
+* [#1156](https://github.com/hjdivad/ember-m3/pull/1156) Add a performance testing app ([@igorT](https://github.com/igorT))
+
+#### Committers: 2
+- Igor Terzic ([@igorT](https://github.com/igorT))
+- Robert Jackson ([@rwjblue](https://github.com/rwjblue))
+
+
+## v4.1.0 (2021-06-25)
+
+#### :rocket: Enhancement
+* [#1145](https://github.com/hjdivad/ember-m3/pull/1145) Make errors attribute configurable ([@spham92](https://github.com/spham92))
+
+#### Committers: 1
+- Steven Pham ([@spham92](https://github.com/spham92))
+
+
+## v4.0.2 (2021-06-24)
+Internal release - no user-visible changes
+
+
+## v4.0.1 (2021-06-24)
+Internal release - no user-visible changes
+
+## v4.0.0 (2021-06-24)
+
+#### :boom: Breaking Change
+* [#1100](https://github.com/hjdivad/ember-m3/pull/1100) Drop support for inactive node 10 ([@hjdivad](https://github.com/hjdivad))
+
+#### :rocket: Enhancement
+* [#1032](https://github.com/hjdivad/ember-m3/pull/1032) Adds support for native Proxy behind a canary feature flag ([@pzuraq](https://github.com/pzuraq))
+* [#787](https://github.com/hjdivad/ember-m3/pull/787) replace computeNestedModel and computeAttributeReference schema hooks with computeAttribute ([@igorT](https://github.com/igorT))
+
+#### :bug: Bug Fix
+* [#1131](https://github.com/hjdivad/ember-m3/pull/1131) Ensure we do not add custom babel plugins multiple times ([@rwjblue](https://github.com/rwjblue))
+* [#1121](https://github.com/hjdivad/ember-m3/pull/1121) Avoid invalid imports in production app tree ([@rwjblue](https://github.com/rwjblue))
+* [#1099](https://github.com/hjdivad/ember-m3/pull/1099) Fix state notifications when CUSTOM_MODEL_CLASS is active ([@runspired](https://github.com/runspired))
+* [#1005](https://github.com/hjdivad/ember-m3/pull/1005) Pass owner when creating M3DebugAdapter ([@pzuraq](https://github.com/pzuraq))
+* [#817](https://github.com/hjdivad/ember-m3/pull/817) temporary fix for stringifying models in the debug adapter ([@betocantu93](https://github.com/betocantu93))
+* [#840](https://github.com/hjdivad/ember-m3/pull/840) Replace `new Object(null)` with `Object.create(null)`. ([@rwjblue](https://github.com/rwjblue))
+
+#### :house: Internal
+* [#1091](https://github.com/hjdivad/ember-m3/pull/1091) Updated pinned yarn version ([@hjdivad](https://github.com/hjdivad))
+* [#1047](https://github.com/hjdivad/ember-m3/pull/1047) Refactor warning capturing and testing. ([@rwjblue](https://github.com/rwjblue))
+* [#822](https://github.com/hjdivad/ember-m3/pull/822) Remove work around for Ember < 2.12 relying on `setOwner` enumerability ([@rwjblue](https://github.com/rwjblue))
+* [#789](https://github.com/hjdivad/ember-m3/pull/789) and [#793](https://github.com/hjdivad/ember-m3/pull/793) TrackedArrays and ReferenceArrays are now unified as a ManagedArray ([@igorT](https://github.com/igorT))
+
+#### Committers: 7
+- Alberto Cantú Gómez ([@betocantu93](https://github.com/betocantu93))
+- Chris Garrett ([@pzuraq](https://github.com/pzuraq))
+- Chris Thoburn ([@runspired](https://github.com/runspired))
+- David J. Hamilton ([@hjdivad](https://github.com/hjdivad))
+- Igor Terzic ([@igorT](https://github.com/igorT))
+- Robert Jackson ([@rwjblue](https://github.com/rwjblue))
+- Steven Pham ([@spham92](https://github.com/spham92))
+
+
+## v3.0.8 (2021-07-28)
+
+#### :bug: Bug Fix
+* [#1131](https://github.com/hjdivad/ember-m3/pull/1131) Ensure we do not add custom babel plugins multiple times ([@rwjblue](https://github.com/rwjblue))
+* [#1121](https://github.com/hjdivad/ember-m3/pull/1121) Avoid invalid imports in production app tree ([@rwjblue](https://github.com/rwjblue))
+* [#1099](https://github.com/hjdivad/ember-m3/pull/1099) Fix state notifications when CUSTOM_MODEL_CLASS is active ([@runspired](https://github.com/runspired))
+
+#### :house: Internal
+* [#1047](https://github.com/hjdivad/ember-m3/pull/1047) Refactor warning capturing and testing. ([@rwjblue](https://github.com/rwjblue))
+
+
+## v3.0.7 (2021-03-17)
+
+#### :bug: Bug Fix
+
+- [#1041](https://github.com/hjdivad/ember-m3/pull/1041) Only execute callback once per key for eachAttribute (backport #1022) ([@betocantu93](https://github.com/betocantu93))
+
+#### Committers: 1
+
+- Alberto Cantú Gómez ([@betocantu93](https://github.com/betocantu93))
+
+## v3.0.6 (2021-03-15)
+
+#### :bug: Bug Fix
+
+- [#1033](https://github.com/hjdivad/ember-m3/pull/1033) fix: outer object replacement and nested property change (backport #1031) ([@spham92](https://github.com/spham92))
+
+#### :house: Internal
+
+- [#1036](https://github.com/hjdivad/ember-m3/pull/1036) chore: bump release-it, release-it-lerna-changelog ([@hjdivad](https://github.com/hjdivad))
+
+#### Committers: 2
+
+- David J. Hamilton ([@hjdivad](https://github.com/hjdivad))
+- Steven Pham ([@spham92](https://github.com/spham92))
+
+## v3.0.5 (2021-01-05)
+
+#### :rocket: Enhancement
+
+- [#784](Add queryParams option for Store.queryURL) (backported via #980)
+
+#### Committers: 1
+
+- ([@2hu](https://github.com/2hu12))
+
+## v3.0.4 (2020-09-29)
+
+#### :bug: Bug Fix
+
+- [#892](https://github.com/hjdivad/ember-m3/pull/892) Fix keeping embedded records in sync inside projections ([@igorT](https://github.com/igorT))
+
+#### Committers: 1
+
+- Igor Terzic ([@igorT](https://github.com/igorT))
+
+## v3.0.3 (2020-08-28)
+
+#### :rocket: Enhancement
+
+- [#852](https://github.com/hjdivad/ember-m3/pull/852) queryURL can resolve primitive values ([@hjdivad](https://github.com/hjdivad))
+
+#### Committers: 1
+
+- David J. Hamilton ([@hjdivad](https://github.com/hjdivad))
+
+## v3.0.2 (2020-08-20)
+
+#### :rocket: Enhancement
+
+- [#837](https://github.com/hjdivad/ember-m3/pull/837) Avoid checking project dependencies more than once per project ([@hjdivad](https://github.com/hjdivad))
+
+#### Committers: 2
+
+- David J. Hamilton ([@hjdivad](https://github.com/hjdivad))
+- Robert Jackson ([@rwjblue](https://github.com/rwjblue))
+
+## v3.0.1 (2020-08-20)
+
+#### :bug: Bug Fix
+
+Avoid `checker.check` when project depends on ember-data for a performance gain
+
+#### Committers: 1
+
+- Robert Jackson ([@rwjblue](https://github.com/rwjblue))
+
 ## v3.0.0 (2020-06-09)
 
 #### :boom: Breaking Change

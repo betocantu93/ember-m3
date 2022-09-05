@@ -3,7 +3,6 @@ import { dasherize } from '@ember/string';
 import EmberObject from '@ember/object';
 import MutableArray from '@ember/array/mutable';
 import { A } from '@ember/array';
-import MegamorphicModel, { EmbeddedMegamorphicModel } from './model';
 import {
   resolveReferencesWithInternalModels,
   resolveReferencesWithRecords,
@@ -14,10 +13,11 @@ import {
   deferPropertyChange,
   flushChanges,
 } from './utils/notify-changes';
-import { CUSTOM_MODEL_CLASS, PROXY_MODEL_CLASS } from 'ember-m3/-infra/features';
+import { CUSTOM_MODEL_CLASS } from 'ember-m3/-infra/features';
 import { recordDataToRecordMap, recordToRecordArrayMap } from './utils/caches';
 import { recordIdentifierFor } from '@ember-data/store';
-import { assert } from '@ember/debug';
+import HAS_NATIVE_PROXY from './utils/has-native-proxy';
+import require from 'require';
 
 /**
  * BaseRecordArray
@@ -27,7 +27,7 @@ import { assert } from '@ember/debug';
 let BaseRecordArray;
 let baseRecordArrayProxyHandler;
 
-if (PROXY_MODEL_CLASS) {
+if (CUSTOM_MODEL_CLASS) {
   const convertToInt = (prop) => {
     if (typeof prop === 'symbol') return null;
 
@@ -39,23 +39,26 @@ if (PROXY_MODEL_CLASS) {
   };
 
   const BaseRecordArrayProxyHandler = class {
+    getPrototypeOf(target) {
+      return Object.getPrototypeOf(target.__recordArray);
+    }
     get(target, key, receiver) {
       let index = convertToInt(key);
 
       if (index !== null) {
-        return receiver.objectAt(key);
+        return target.__recordArray.objectAt(key);
       }
 
-      return Reflect.get(target, key, receiver);
+      return Reflect.get(target.__recordArray, key, receiver);
     }
 
     set(target, key, value, receiver) {
       let index = convertToInt(key);
 
       if (index !== null) {
-        receiver.replaceAt(index, value);
+        receiver.replace(index, 1, [value]);
       } else {
-        Reflect.set(target, key, value, receiver);
+        Reflect.set(target.__recordArray, key, value);
       }
 
       return true;
@@ -72,22 +75,26 @@ if (CUSTOM_MODEL_CLASS) {
    * @class BaseRecordArray
    */
   BaseRecordArray = class BaseRecordArray extends EmberObject.extend(MutableArray) {
+    [Symbol.iterator] = Array.prototype.values;
+
     // public RecordArray API
     static create(...args) {
       let instance = super.create(...args);
-
-      if (PROXY_MODEL_CLASS) {
-        return new Proxy(instance, baseRecordArrayProxyHandler);
+      if (HAS_NATIVE_PROXY) {
+        let arr = [];
+        arr.__recordArray = instance;
+        return new Proxy(arr, baseRecordArrayProxyHandler);
+        // IE11 support
+      } else {
+        return instance;
       }
-
-      return instance;
     }
 
     init() {
       super.init(...arguments);
       this._references = [];
       if (!this._objects) {
-        this._objects = A();
+        this._objects = [];
       }
       this._resolved = false;
       this.store = this.store || null;
@@ -104,7 +111,7 @@ if (CUSTOM_MODEL_CLASS) {
         }
       }
 
-      this._objects.replace(idx, removeAmt, newObjects);
+      this._objects.splice(idx, removeAmt, ...newObjects);
       this.arrayContentDidChange(idx, removeAmt, newObjects.length);
       this._registerWithObjects(newObjects);
       this._resolved = true;
@@ -119,13 +126,16 @@ if (CUSTOM_MODEL_CLASS) {
 
     _removeObject(object) {
       if (this._resolved) {
-        this._objects.removeObject(object);
-        deferArrayPropertyChange(this.store, this, 0, 1, 0);
-        deferPropertyChange(this.store, this, '[]');
-        deferPropertyChange(this.store, this, 'length');
-        // eager change events here; we're not processing payloads (that goes
-        // through `_setInternalModels`); we're doing `unloadRecord`
-        flushChanges(this.store);
+        let idx = this._objects.indexOf(object);
+        if (idx > -1) {
+          this._objects.splice(idx, 1);
+          deferArrayPropertyChange(this.store, this, idx, 1, 0);
+          deferPropertyChange(this.store, this, '[]');
+          deferPropertyChange(this.store, this, 'length');
+          // eager change events here; we're not processing payloads (that goes
+          // through `_setInternalModels`); we're doing `unloadRecord`
+          flushChanges(this.store);
+        }
       } else {
         for (let j = 0; j < this._references.length; ++j) {
           let { id, type } = this._references[j];
@@ -144,7 +154,7 @@ if (CUSTOM_MODEL_CLASS) {
     _setObjects(objects, triggerChange = true) {
       let originalLength = this._objects.length;
       if (triggerChange) {
-        this._objects.replace(0, this._objects.length, objects);
+        this._objects.splice(0, this._objects.length, ...objects);
         deferArrayPropertyChange(this.store, this, 0, originalLength, this._objects.length);
         deferPropertyChange(this.store, this, '[]');
         deferPropertyChange(this.store, this, 'length');
@@ -166,7 +176,7 @@ if (CUSTOM_MODEL_CLASS) {
       this._references = references;
       this._resolved = false;
       let originalLength = this._objects.length;
-      this._objects = A();
+      this._objects = [];
       deferArrayPropertyChange(this.store, this, 0, originalLength, this._objects.length);
       deferPropertyChange(this.store, this, '[]');
       deferPropertyChange(this.store, this, 'length');
@@ -180,7 +190,7 @@ if (CUSTOM_MODEL_CLASS) {
         }
         let index = this._objects.indexOf(record);
         if (index > -1) {
-          this._objects.removeObject(record);
+          this._objects.splice(index, 1);
           this.arrayContentDidChange(index, 1, 0);
         }
       }
@@ -193,6 +203,23 @@ if (CUSTOM_MODEL_CLASS) {
         }
         associateRecordWithRecordArray(object, this);
       });
+    }
+
+    // Need to override `removeAt`, `pushObject`, and `insertAt` because the default implementations by
+    // MutableArray will end up calling replaceInNativeArray and not our own replace after an `isArray` check
+    // https://github.com/emberjs/ember.js/blob/21bd70c773dcc4bfe4883d7943e8a68d203b5bad/packages/%40ember/-internals/metal/lib/array.ts#L27
+    // https://github.com/emberjs/ember.js/blob/21bd70c773dcc4bfe4883d7943e8a68d203b5bad/packages/%40ember/-internals/metal/lib/array.ts#L38
+    removeAt(index, len = 1) {
+      this.replace(index, len, []);
+      return this;
+    }
+
+    pushObject(obj) {
+      return this.insertAt(this.length, obj);
+    }
+
+    insertAt(idx, object) {
+      return this.replace(idx, 0, [object]);
     }
 
     _resolve() {
@@ -217,8 +244,6 @@ if (CUSTOM_MODEL_CLASS) {
     // public RecordArray API
     static create(...args) {
       let instance = super.create(...args);
-
-      assert('CUSTOM_MODEL_CLASS must be enabled to use PROXY_MODEL_CLASS', !PROXY_MODEL_CLASS);
 
       return instance;
     }
@@ -254,7 +279,7 @@ if (CUSTOM_MODEL_CLASS) {
       this._resolve();
       let internalModel = this._internalModels[idx];
       return internalModel !== null && internalModel !== undefined
-        ? internalModel.getRecord
+        ? typeof internalModel === 'object' && 'getRecord' in internalModel
           ? internalModel.getRecord()
           : internalModel
         : undefined;
@@ -330,7 +355,12 @@ if (CUSTOM_MODEL_CLASS) {
 
         // allow refs to point to resources not in the store
         // TODO: instead add a schema missing ref hook; #254
-        if (internalModel !== null && internalModel !== undefined && internalModel._recordArrays) {
+        if (
+          internalModel !== null &&
+          internalModel !== undefined &&
+          typeof internalModel === 'object' &&
+          '_recordArrays' in internalModel
+        ) {
           internalModel._recordArrays.add(this);
         }
       }
@@ -355,9 +385,18 @@ if (CUSTOM_MODEL_CLASS) {
   };
 }
 
-if (PROXY_MODEL_CLASS) {
+if (CUSTOM_MODEL_CLASS) {
   // Add native array methods here
   Object.assign(BaseRecordArray.prototype, {
+    values: Array.prototype.values,
+    keys: Array.prototype.keys,
+    entries: Array.prototype.entries,
+    copyWithin: Array.prototype.copyWithin,
+    fill: Array.prototype.fill,
+    findIndex: Array.prototype.findIndex,
+    at: Array.prototype.at,
+    join: Array.prototype.join,
+
     push(...values) {
       return this.pushObjects(values);
     },
@@ -366,8 +405,8 @@ if (PROXY_MODEL_CLASS) {
       return this.popObjects(values);
     },
 
-    shift(...values) {
-      return this.shiftObjects(values);
+    shift() {
+      return this.shiftObject();
     },
 
     unshift(...values) {
@@ -378,13 +417,38 @@ if (PROXY_MODEL_CLASS) {
       return this.replace(idx, amt, values);
     },
 
+    some(callback) {
+      return this.any(callback);
+    },
+
+    concat(values) {
+      return this.toArray().concat(...values);
+    },
+
     reverse() {
-      return this.reverseObjects();
+      let reversed = this.toArray().reverse();
+      this.replace(0, this.length, reversed);
+    },
+
+    reduceRight(callback, init) {
+      return this.toArray().reduceRight(callback, init);
+    },
+
+    sort(callback) {
+      let sorted = this.toArray().sort(callback);
+      this.replace(0, this.length, sorted);
     },
   });
 }
 
+let MegamorphicModel, EmbeddedMegamorphicModel;
 export function associateRecordWithRecordArray(record, recordArray) {
+  // Doing the require at runtime to avoid creating a circular dependency
+  if (MegamorphicModel === undefined) {
+    let modelModule = require('ember-m3/model');
+    MegamorphicModel = modelModule.default;
+    EmbeddedMegamorphicModel = modelModule.EmbeddedMegamorphicModel;
+  }
   if (record instanceof EmbeddedMegamorphicModel) {
     // embedded models can be added across tracked arrays (although this is
     // weird) but since they can't be unloaded there's no need to associate the

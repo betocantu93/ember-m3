@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v1
         with:
-          node-version: '12.x' # preferred node version
+          node-version: '14.x' # preferred node version
       - name: yarn install
         run: yarn --frozen-lockfile --install
       - name: lint
@@ -31,48 +31,54 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v1
         with:
-          node-version: '10.x' # min node version
+          node-version: '12.x' # min node version
       - name: yarn install
         run: yarn --frozen-lockfile --install
       - name: test
         run: yarn test
 
-  test-feature-flags:
-    name: feature flags
+  test-production:
+    name: test production build
     needs: [lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v1
         with:
-          node-version: '10.x' # min node version
+          node-version: '12.x' # min node version
       - name: yarn install
         run: yarn --frozen-lockfile --install
-      - name: test:feature-flags
-        run: yarn run ember try:one canary-channel --- ember test --query enableoptionalfeatures
+      - name: test
+        run: yarn test:production
 
-  test-proxy:
-    name: proxy
+  test-performance-app:
+    name: performance-app
     needs: [lint]
     runs-on: ubuntu-latest
+
+    # run all of the commands below inside the perf test app
+    defaults:
+      run:
+        working-directory: m3-perf-testing-app
+
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v1
         with:
-          node-version: '10.x' # min node version
+          node-version: '12.x' # min node version
       - name: yarn install
         run: yarn --frozen-lockfile --install
-      - name: test:feature-flags
-        run: yarn run ember try:one canary-channel --- ember test --query enableproxy
+      - name: test:performance-app
+        run: yarn test
 
   test-node:
-    name: 't:' # rely on matrix for most of name
-    needs: [lint, test, test-feature-flags]
+    name: "t:${{matrix.node}}"
+    needs: [lint, test]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        node: [10.x, 12.x, 14.x] # LTS + current
+        node: [12.x, 14.x, 16.x] # Active and Current LTS
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v1
@@ -84,8 +90,8 @@ jobs:
         run: yarn test
 
   test-ember:
-    name: 't:' # rely on matrix for most of name
-    needs: [lint, test, test-feature-flags]
+    name: "t:${{matrix.try-scenario}}"
+    needs: [lint, test]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -95,9 +101,25 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v1
         with:
-          node-version: 10.x
+          node-version: '12.x' # min node version
       - name: yarn install
         run: yarn --frozen-lockfile --install
       - name: try ${{matrix.try-scenario}}
         run: yarn run ember try:one ${{matrix.try-scenario}}
 
+  browser-tests:
+    needs: [lint]
+    runs-on: windows-latest
+    name: test-ie
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-node@v1
+        with:
+          node-version: '14.x' # preferred node version
+      - name: yarn install
+        run: yarn --frozen-lockfile --install
+      - name: test
+        env:
+          TESTEM_CI_LAUNCHER: IE
+          CI: true
+        run: yarn test

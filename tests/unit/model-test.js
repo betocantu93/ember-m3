@@ -2,6 +2,7 @@ import { module, test } from 'qunit';
 import { setupTest } from 'ember-qunit';
 import sinon from 'sinon';
 import { CUSTOM_MODEL_CLASS } from 'ember-m3/-infra/features';
+import { DEBUG } from '@glimmer/env';
 import { recordDataFor } from 'ember-m3/-private';
 import { zip } from 'lodash';
 import { Errors as ModelErrors } from '@ember-data/model/-private';
@@ -14,9 +15,9 @@ import { isArray } from '@ember/array';
 
 import MegamorphicModel from 'ember-m3/model';
 import DefaultSchema from 'ember-m3/services/m3-schema';
-import require from 'require';
 
 import { capturedWarnings, captureWarnings } from '../helpers/warning-handler';
+import { watchProperty } from '../helpers/watch-property';
 
 const Errors = ModelErrors || StoreErrors;
 
@@ -531,7 +532,7 @@ for (let testRun = 0; testRun < 2; testRun++) {
             type: 'com.example.bookstore.Book',
             attributes: {
               name: `Harry Potter and the Sorcerer's Stone`,
-              pubDate: 'September 1989',
+              pubDate: '01 September 1989',
               chapters: {
                 one: {
                   title: 'The Boy Who Lived',
@@ -542,7 +543,7 @@ for (let testRun = 0; testRun < 2; testRun++) {
         })
       );
 
-      let sept1989 = new Date(Date.parse('September 1989')).getTime();
+      let sept1989 = new Date(Date.parse('01 September 1989')).getTime();
 
       assert.equal(
         get(model, 'title'),
@@ -908,39 +909,25 @@ for (let testRun = 0; testRun < 2; testRun++) {
           },
         });
       });
-
-      let propChanges = [];
-      // TODO Convert this to use watch-property helper
-      model.addObserver('fans', (model, key) => {
-        propChanges.push([model + '', key]);
-      });
-
+      let fansWatcher = watchProperty(model, 'fans');
       // observe alias
-      // TODO Convert this to use watch-property helper
-      model.addObserver('title', (model, key) => {
-        propChanges.push([model + '', key]);
-      });
-
+      let titleWatcher = watchProperty(model, 'title');
       run(() => {
         set(model, 'fans', 'millions');
-        // check that alias doesn't get prop changes when not requested
+        // title is aliased to name
         set(model, 'name', 'First Book');
       });
-
-      assert.deepEqual(
-        propChanges,
-        [[model + '', 'fans']],
-        'change events trigger for direct props'
+      assert.equal(fansWatcher.count, 1, 'change events trigger for direct props');
+      assert.equal(
+        titleWatcher.count,
+        0,
+        "check that alias doesn't get prop changes when not requested"
       );
-
-      propChanges.splice(0, propChanges.length);
       assert.equal(get(model, 'title'), `First Book`, 'initialize alias');
-
       run(() => {
         set(model, 'name', 'Book 1');
       });
-
-      assert.deepEqual(propChanges, [[model + '', 'title']], 'change events trigger for aliases');
+      assert.equal(titleWatcher.count, 1, 'change events trigger for aliases');
     });
 
     test('.setUnknownProperty sets attributes to given value for uncached values', function (assert) {
@@ -2511,6 +2498,55 @@ for (let testRun = 0; testRun < 2; testRun++) {
       );
     });
 
+    if (CUSTOM_MODEL_CLASS) {
+      test('.unloadRecord doese not update reference record arrays when the store is being destroyed', function (assert) {
+        let model = run(() => {
+          return this.store.push({
+            data: {
+              id: 'isbn:9780439708180',
+              type: 'com.example.bookstore.Book',
+              attributes: {
+                name: `Harry Potter and the Sorcerer's Stone`,
+                '*relatedBooks': ['isbn:9780439064873', 'isbn:9780439136365'],
+              },
+            },
+            included: [
+              {
+                id: 'isbn:9780439064873',
+                type: 'com.example.bookstore.Book',
+                attributes: {
+                  name: `Harry Potter and the Chamber of Secrets`,
+                },
+              },
+              {
+                id: 'isbn:9780439136365',
+                type: 'com.example.bookstore.Book',
+                attributes: {
+                  name: `Harry Potter and the Prisoner of Azkaban`,
+                },
+              },
+            ],
+          });
+        });
+
+        let books = model.get('relatedBooks');
+        let didChangeCount = 0;
+        books.addArrayObserver({
+          arrayDidChange() {
+            ++didChangeCount;
+          },
+        });
+        assert.deepEqual(
+          model.get('relatedBooks').mapBy('name'),
+          [`Harry Potter and the Chamber of Secrets`, `Harry Potter and the Prisoner of Azkaban`],
+          'initial state as expected'
+        );
+
+        run(() => this.owner.destroy());
+        assert.equal(didChangeCount, 0, 'Did not emit change events');
+      });
+    }
+
     test('.unloadRecord on a nested model warns and does not error', function (assert) {
       let model = run(() => {
         return this.store.push({
@@ -2549,15 +2585,19 @@ for (let testRun = 0; testRun < 2; testRun++) {
       // nestedModel.unloadRecord();
       // assert.expectWarning(`Nested models cannot be directly unloaded.  Perhaps you meant to unload the top level model, 'com.example.bookstore.book:1'`);
 
-      captureWarnings();
+      if (DEBUG) {
+        captureWarnings();
+      }
 
       nestedModel.unloadRecord();
-      assert.deepEqual(capturedWarnings, [
-        [
-          "Nested models cannot be directly unloaded.  Perhaps you meant to unload the top level model, 'com.example.bookstore.book:1'",
-          { id: 'ember-m3.nested-model-unloadRecord' },
-        ],
-      ]);
+      if (DEBUG) {
+        assert.deepEqual(capturedWarnings, [
+          [
+            "Nested models cannot be directly unloaded.  Perhaps you meant to unload the top level model, 'com.example.bookstore.book:1'",
+            { id: 'ember-m3.nested-model-unloadRecord' },
+          ],
+        ]);
+      }
       assert.equal(
         this.store.hasRecordForId('com.example.bookstore.book', '1'),
         true,
@@ -3112,16 +3152,10 @@ for (let testRun = 0; testRun < 2; testRun++) {
       assert.expect(10);
 
       const modelName = 'com.example.bookstore.Book';
-      function makeInvalidError(errors) {
-        // TODO: This is only used for ember-data 3.12
-        if (require.has('ember-data/adapters/errors')) {
-          const InvalidError = require('ember-data/adapters/errors').InvalidError;
-          return new InvalidError(errors);
-        }
+      function makeInvalidError() {
         const error = new Error('The adapter rejected the commit because it was invalid');
         error.code = 'InvalidError';
         error.isAdapterError = true;
-        error.errors = errors;
         return error;
       }
 
@@ -3130,39 +3164,21 @@ for (let testRun = 0; testRun < 2; testRun++) {
         EmberObject.extend({
           updateRecord(store, type, snapshot) {
             assert.equal(snapshot.record.get('isSaving'), true, 'record is saving');
-            return Promise.reject(
-              makeInvalidError([
-                {
-                  source: 'estimatedPubDate',
-                  detail: 'Please enter valid estimated publish date',
-                },
-                {
-                  source: 'name',
-                  detail: 'Please enter valid name',
-                },
-              ])
-            );
+            return Promise.reject(makeInvalidError());
           },
         })
       );
-
       this.owner.register(
         'serializer:-ember-m3',
         EmberObject.extend({
-          extractErrors(store, typeClass, payload, id) {
-            if (payload && typeof payload === 'object' && payload.errors) {
-              const record = store.peekRecord(modelName, id);
-              payload.errors.forEach((error) => {
-                if (error.source) {
-                  const errorField = error.source;
-                  record.get('errors').add(errorField, error.detail);
-                }
-              });
-            }
+          extractErrors() {
+            return {
+              estimatedPubDate: 'Please enter valid estimated publish date',
+              name: 'Please enter valid name',
+            };
           },
         })
       );
-
       let model = run(() => {
         return this.store.push({
           data: {

@@ -3,6 +3,7 @@ import { setupTest } from 'ember-qunit';
 import { run } from '@ember/runloop';
 import { recordDataFor } from 'ember-m3/-private';
 import DefaultSchema from 'ember-m3/services/m3-schema';
+import { DEBUG } from '@glimmer/env';
 
 class TestSchema extends DefaultSchema {
   includesModel(modelName) {
@@ -48,7 +49,7 @@ for (let testRun = 0; testRun < 2; testRun++) {
       });
 
       test('.save saves via the store', function (assert) {
-        assert.expect(4);
+        assert.expect(7);
 
         this.owner.register(
           'adapter:-ember-m3',
@@ -59,6 +60,7 @@ for (let testRun = 0; testRun < 2; testRun++) {
 
             updateRecord(store, type, snapshot) {
               assert.equal(snapshot.record.get('isSaving'), true, 'record is saving');
+              assert.equal(snapshot.record.get('author.isSaving'), true, 'nested record is saving');
               return Promise.resolve({
                 data: {
                   id: 1,
@@ -66,6 +68,9 @@ for (let testRun = 0; testRun < 2; testRun++) {
                   attributes: {
                     name: 'The Winds of Winter',
                     estimatedRating: '11/10',
+                    author: {
+                      name: 'George R. R. Martin',
+                    },
                   },
                 },
               });
@@ -81,24 +86,32 @@ for (let testRun = 0; testRun < 2; testRun++) {
               attributes: {
                 name: 'The Winds of Winter',
                 estimatedPubDate: 'January 2622',
+                author: {
+                  name: 'George R. R. Martin',
+                },
               },
             },
           });
         });
 
         assert.equal(record.get('isSaving'), false, 'initially record not saving');
+        assert.equal(record.get('author.isSaving'), false, 'initially nested record not saving');
 
         return run(() => {
           record.set('estimatedPubDate', '2231?');
 
           return record.save().then(() => {
             assert.equal(record.get('isSaving'), false, 'record done saving');
+            assert.equal(record.get('author.isSaving'), false, 'nested record done saving');
             assert.deepEqual(
               recordDataFor(record)._data,
               {
                 name: 'The Winds of Winter',
                 estimatedRating: '11/10',
                 estimatedPubDate: '2231?',
+                author: {
+                  name: 'George R. R. Martin',
+                },
               },
               'data post save resolve'
             );
@@ -106,8 +119,8 @@ for (let testRun = 0; testRun < 2; testRun++) {
         });
       });
 
-      test('.save disallows saving embedded models', function (assert) {
-        assert.expect(1);
+      test('.save creates via the store', function (assert) {
+        assert.expect(6);
 
         this.owner.register(
           'adapter:-ember-m3',
@@ -116,34 +129,149 @@ for (let testRun = 0; testRun < 2; testRun++) {
               return new TestAdapter(...arguments);
             }
 
-            updateRecord() {
-              assert.ok(false, 'Adapter updateRecord should not be invoked');
+            createRecord(store, type, snapshot) {
+              assert.equal(snapshot.record.get('isSaving'), true, 'record is saving');
+              return Promise.resolve({
+                data: {
+                  id: 1,
+                  type: 'com.example.bookstore.Book',
+                  attributes: {
+                    name: 'The Winds of Winter',
+                    estimatedRating: '11/10',
+                  },
+                },
+              });
             }
           }
         );
 
-        let record = run(() => {
-            return this.store.push({
-              data: {
-                id: 1,
-                type: 'com.example.bookstore.Book',
-                attributes: {
-                  author: {
-                    name: 'George R. R. Martin',
-                  },
-                  name: 'The Winds of Winter',
-                  estimatedPubDate: 'January 2622',
-                },
-              },
-            });
-          }),
-          author = record.get('author');
+        let record = this.store.createRecord('com.example.bookstore.Book', {
+          name: 'The Storm Before the Storm',
+        });
 
-        assert.throws(
-          () => author.save(),
-          /Nested models cannot be directly saved. Perhaps you meant to save the top level model, 'com.example.bookstore.book:1'/
+        assert.equal(record.get('isSaving'), false, 'initially record not saving');
+        assert.equal(record.get('isDirty'), true, 'record is dirty');
+
+        return record.save().then(() => {
+          assert.equal(record.get('isSaving'), false, 'record done saving');
+          assert.equal(record.get('isDirty'), false, 'record is no longer dirty');
+          assert.deepEqual(
+            recordDataFor(record)._data,
+            {
+              name: 'The Winds of Winter',
+              estimatedRating: '11/10',
+            },
+            'data post save resolve'
+          );
+        });
+      });
+
+      test('record.isError is true after a rejected save', async function (assert) {
+        assert.expect(5);
+        let count = 0;
+
+        this.owner.register(
+          'adapter:-ember-m3',
+          class TestAdapter {
+            static create() {
+              return new TestAdapter(...arguments);
+            }
+
+            updateRecord(store, type, snapshot) {
+              if (count === 0) {
+                count++;
+                assert.equal(snapshot.record.get('isSaving'), true, 'record is saving');
+                return Promise.reject(new Error('Some error'));
+              } else {
+                return Promise.resolve({
+                  data: {
+                    id: 1,
+                    type: 'com.example.bookstore.Book',
+                    attributes: {
+                      name: 'The Winds of Winter',
+                    },
+                  },
+                });
+              }
+            }
+          }
+        );
+
+        let record = this.store.push({
+          data: {
+            id: 1,
+            type: 'com.example.bookstore.Book',
+            attributes: {
+              name: 'The Winds of Winter',
+              estimatedPubDate: 'January 2622',
+            },
+          },
+        });
+
+        try {
+          await record.save();
+        } catch (e) {
+          assert.equal(
+            record.get('isError'),
+            true,
+            'rejecting a save sets the `isError` flag to true'
+          );
+          assert.equal(
+            record.get('adapterError').message,
+            'Some error',
+            'rejecting a save populates the adapterError field'
+          );
+        }
+
+        await record.save();
+        assert.equal(record.get('isError'), false, 'sucessfully saving sets `isError` to false');
+        assert.equal(
+          record.get('adapterError'),
+          null,
+          'sucessfully saving sets adapterError to null'
         );
       });
+
+      if (DEBUG) {
+        test('.save disallows saving embedded models', function (assert) {
+          assert.expect(1);
+
+          this.owner.register(
+            'adapter:-ember-m3',
+            class TestAdapter {
+              static create() {
+                return new TestAdapter(...arguments);
+              }
+
+              updateRecord() {
+                assert.ok(false, 'Adapter updateRecord should not be invoked');
+              }
+            }
+          );
+
+          let record = run(() => {
+              return this.store.push({
+                data: {
+                  id: 1,
+                  type: 'com.example.bookstore.Book',
+                  attributes: {
+                    author: {
+                      name: 'George R. R. Martin',
+                    },
+                    name: 'The Winds of Winter',
+                    estimatedPubDate: 'January 2622',
+                  },
+                },
+              });
+            }),
+            author = record.get('author');
+
+          assert.throws(
+            () => author.save(),
+            /Nested models cannot be directly saved. Perhaps you meant to save the top level model, 'com.example.bookstore.book:1'/
+          );
+        });
+      }
 
       test('.reload calls findRecord with reload: true and passes adapterOptions', function (assert) {
         assert.expect(3);

@@ -3,7 +3,7 @@
 
 import EmberObject, { computed, get, set, defineProperty } from '@ember/object';
 import { isArray } from '@ember/array';
-import { assert, warn } from '@ember/debug';
+import { assert, warn, deprecate } from '@ember/debug';
 import { readOnly } from '@ember/object/computed';
 import { recordDataToRecordMap } from './utils/caches';
 
@@ -17,7 +17,7 @@ import {
   flushChanges,
 } from './utils/notify-changes';
 import { DEBUG } from '@glimmer/env';
-import { CUSTOM_MODEL_CLASS, PROXY_MODEL_CLASS } from 'ember-m3/-infra/features';
+import { CUSTOM_MODEL_CLASS } from 'ember-m3/-infra/features';
 import { RootState, Errors as StoreErrors } from '@ember-data/store/-private';
 import { Errors as ModelErrors } from '@ember-data/model/-private';
 import { REFERENCE, schemaTypesInfo } from './utils/schema-types-info';
@@ -76,14 +76,12 @@ const YesManAttributes = new YesManAttributesSingletonClass();
 //      CP or setknownProperty can rely on any initialization
 let initProperites = Object.create(null);
 
-let megamorphicModelProxyHandler;
+let megamorphicModelProxyHandler, megamorphicNativeDeprecationHandler;
 
-if (PROXY_MODEL_CLASS) {
-  console.warn(
-    'You have enabled experimental M3 proxy support. This is a canary feature that is still under development, and can only be used in development mode for testing purposes. It will NOT work in production builds'
-  );
-
+if (CUSTOM_MODEL_CLASS) {
   const MegamorphicModelProxyHandler = class {
+    getting = '';
+
     get(target, key, receiver) {
       if (typeof key !== 'string' || key in target) {
         return Reflect.get(target, key, receiver);
@@ -92,10 +90,45 @@ if (PROXY_MODEL_CLASS) {
       // Ideally we would do `receiver.unknownProperty(key)` here, but
       // unfortunately `unknownProperty` does not entangle the property
       // tag. `Ember.get` is the only thing that does, actually, so we
-      // have to use it. This is safe, because we already checked that the
-      // property is not `in` the instance, so it will definitely call
-      // `unknownProperty` and will not re-enter.
-      return receiver.get(key);
+      // have to use it. However we need to be careful that we do not end
+      // up in an infinite loop when relying on `Ember.get` calling
+      // `.unknownProperty`
+
+      // `Ember.get` is going to check whether `receiver` has the `key`
+      // property defined, and if not, call `.unknownProperty`
+
+      // However, the way that check is implemented differs slightly
+      // between the DEBUG and production ember builds.
+      // See: https://github.com/emberjs/ember.js/blob/3ce13cea235cde8a87d89473533c453523412764/packages/%40ember/-internals/metal/lib/property_get.ts#L110
+
+      // In DEBUG, Ember will have it's own debug proxies installed before this proxy,
+      // and Ember's proxy will have stashed the `target` (in this case the m3 model) under a symbol.
+      // See: https://github.com/emberjs/ember.js/blob/3ce13cea235cde8a87d89473533c453523412764/packages/%40ember/-internals/metal/lib/property_get.ts#L22
+      // To check whether it should call `unknonwnProperty`, `Ember.get` will check for property existance
+      // on the stashed target. Because we have already checked that `key` is not `in target`,
+      // we know the target check will return false, and we are not going re-enter and cause an infinite loop.
+
+      // In production, without Ember's debug Proxies, we will go through
+      // a more straightforward path, where `Ember.get` will do a `receiver[key]` check
+      // to decided whether to call `.unknownProperty`. In that case, we need to make sure
+      // that the second time this getter is called with the key, we return `undefined`
+      // to trigger `unknownProperty`, as otherwise we will end up in an infinite loop
+      // of repeatadly calling `receiver.get`
+
+      if (this.getting === key) {
+        return undefined;
+      }
+
+      let shouldReset = this.getting === '';
+      this.getting = key;
+
+      try {
+        return get(receiver, key);
+      } finally {
+        if (shouldReset) {
+          this.getting = '';
+        }
+      }
     }
 
     set(target, key, value, receiver) {
@@ -116,24 +149,67 @@ if (PROXY_MODEL_CLASS) {
   };
 
   megamorphicModelProxyHandler = new MegamorphicModelProxyHandler();
+  if (DEBUG) {
+    const MegamorphicNativeDeprecationProxyHandler = class {
+      // Need to implement the getter for the Ember Proxy assertions to work
+      get(target, key) {
+        return Reflect.get(target, key);
+      }
+
+      set(target, key, value, receiver) {
+        Reflect.set(target, key, value, receiver);
+        if (typeof key !== 'symbol' && !(key in MegamorphicModel.prototype)) {
+          deprecate(
+            `You set the property '${key}' on a '${target._modelName}' with id '${target.id}'. In order to migrate to using native property access for m3 fields, you need to migrate away from setting other values on the model.`,
+            false,
+            {
+              id: 'm3.model.native-property',
+              until: '5.0',
+              for: 'ember-m3',
+              since: {
+                available: '4.2.0',
+                enabled: '4.2.0',
+              },
+            }
+          );
+        }
+        return true;
+      }
+    };
+
+    megamorphicNativeDeprecationHandler = new MegamorphicNativeDeprecationProxyHandler();
+  }
 }
 
 export default class MegamorphicModel extends EmberObject {
   static create(...args) {
     let instance = super.create(...args);
+    let value = instance;
+    if (CUSTOM_MODEL_CLASS) {
+      let useNative = instance._schema.useNativeProperties(instance._modelName);
 
-    if (PROXY_MODEL_CLASS) {
-      assert('CUSTOM_MODEL_CLASS must be enabled to use PROXY_MODEL_CLASS', CUSTOM_MODEL_CLASS);
+      if (useNative === true) {
+        let proxy = new Proxy(instance, megamorphicModelProxyHandler);
 
-      let proxy = new Proxy(instance, megamorphicModelProxyHandler);
+        // Update the mapping to point to the proxy instead of the instance
+        recordDataToRecordMap.set(instance._recordData, proxy);
+        value = proxy;
+      }
+      if (DEBUG) {
+        if (useNative === false) {
+          let proxy = new Proxy(instance, megamorphicNativeDeprecationHandler);
 
-      // Update the mapping to point to the proxy instead of the instance
-      recordDataToRecordMap.set(instance._recordData, proxy);
-
-      return proxy;
+          // Update the mapping to point to the proxy instead of the instance
+          recordDataToRecordMap.set(instance._recordData, proxy);
+          value = proxy;
+        }
+      }
     }
-
-    return instance;
+    if (!value._topModel) {
+      value._topModel = value;
+    }
+    value._flushInitProperties();
+    return value;
   }
 
   init(properties) {
@@ -147,22 +223,16 @@ export default class MegamorphicModel extends EmberObject {
       // and might just keep the properties.
       // TODO investigate that in ED and if so, we should simplify this case as well
       this._invalidRequests = [];
-      this._errorRequests = [];
-      this._lastErrorRequest = null;
     }
     this._store = properties.store;
     this._cache = Object.create(null);
     this._schema = get(properties.store, '_schemaManager');
-
-    this._topModel = this._topModel || this;
     this._parentModel = this._parentModel || null;
     this._errors = null;
     this._init = true;
     if (!CUSTOM_MODEL_CLASS) {
       this._internalModel = properties._internalModel;
     }
-
-    this._flushInitProperties();
   }
 
   _setIdentifier(identifier) {
@@ -170,17 +240,16 @@ export default class MegamorphicModel extends EmberObject {
       this._identifier = identifier;
       this._store.getRequestStateService().subscribeForRecord(this._identifier, (request) => {
         if (request.state === 'rejected') {
-          // TODO filter out queries
-          this._lastErrorRequest = request;
-          if (!(request.result && isInvalidError(request.result.error))) {
-            this._errorRequests.push(request);
+          if (!(request.response && isInvalidError(request.response.data))) {
+            this.set('isError', true);
+            this.set('adapterError', request.response && request.response.data);
           } else {
             this._invalidRequests.push(request);
           }
         } else if (request.state === 'fulfilled') {
+          this.set('isError', false);
+          this.set('adapterError', null);
           this._invalidRequests = [];
-          this._errorRequests = [];
-          this._lastErrorRequest = null;
         }
         this._notifyNetworkChanges();
       });
@@ -243,7 +312,6 @@ export default class MegamorphicModel extends EmberObject {
 
   _updateCurrentState(state) {
     if (CUSTOM_MODEL_CLASS) {
-      notifyPropertyChange(this, 'isDirty');
       notifyPropertyChange(this, 'isDeleted');
       notifyPropertyChange(this, 'isNew');
       // TODO need to walk the chain down as well to notify changes
@@ -251,6 +319,12 @@ export default class MegamorphicModel extends EmberObject {
     if (this !== this._topModel) {
       this._topModel._updateCurrentState(!CUSTOM_MODEL_CLASS && state);
       return;
+    }
+
+    // isDirty for embedded models depends on the parent state
+    // se we only notify changes for top level models
+    if (CUSTOM_MODEL_CLASS) {
+      notifyPropertyChange(this, 'isDirty');
     }
     // assert we don't need this anymore
     if (!CUSTOM_MODEL_CLASS) {
@@ -272,6 +346,15 @@ export default class MegamorphicModel extends EmberObject {
   }
 
   notifyPropertyChange(key) {
+    if (CUSTOM_MODEL_CLASS) {
+      // just super and move on for state flags
+      // this needs to match whatever we are notifying
+      // in our subscription to the notificationManager
+      if (['isNew', 'isDeleted', 'isDirty'].indexOf(key) !== -1) {
+        super.notifyPropertyChange(key);
+        return;
+      }
+    }
     const recordData = recordDataFor(this);
     const schemaInterface = recordData.schemaInterface;
     let resolvedKeysInCache = schemaInterface._getDependentResolvedKeys(key);
@@ -414,7 +497,6 @@ export default class MegamorphicModel extends EmberObject {
   deleteRecord() {
     if (CUSTOM_MODEL_CLASS) {
       recordDataFor(this).setIsDeleted(true);
-      this._updateCurrentState();
     } else {
       let newState = get(this, 'isNew') ? deletedSaved : deletedUncommitted;
       this._updateCurrentState(newState);
@@ -436,51 +518,49 @@ export default class MegamorphicModel extends EmberObject {
       assertNoChanges(this._store);
     }
 
-    let dirtyKeys = recordDataFor(this).rollbackAttributes();
-    this._updateCurrentState(!CUSTOM_MODEL_CLASS && loadedSaved);
-
-    if (dirtyKeys && dirtyKeys.length > 0) {
-      this._notifyProperties(dirtyKeys);
+    if (CUSTOM_MODEL_CLASS) {
+      recordDataFor(this).rollbackAttributes(true);
+    } else {
+      let dirtyKeys = recordDataFor(this).rollbackAttributes();
+      this._updateCurrentState(loadedSaved);
+      if (dirtyKeys && dirtyKeys.length > 0) {
+        this._notifyProperties(dirtyKeys);
+      }
     }
     flushChanges(this._store);
   }
 
   unknownProperty(key) {
+    let returnValue;
     if (key in this._cache) {
-      return this._cache[key];
-    }
-
-    if (!this._schema.isAttributeIncluded(this._modelName, key)) {
+      returnValue = this._cache[key];
+    } else if (!this._schema.isAttributeIncluded(this._modelName, key)) {
       return;
-    }
+    } else {
+      let rawValue = recordDataFor(this).getAttr(key);
+      // TODO IGOR DAVID
+      // figure out if any of the below should be moved into recordData
+      if (rawValue === undefined) {
+        let attrAlias = this._schema.getAttributeAlias(this._modelName, key);
+        if (attrAlias) {
+          const cp = readOnly(attrAlias);
+          defineProperty(this, key, cp);
+          return get(this, key);
+        }
 
-    let rawValue = recordDataFor(this).getAttr(key);
-    // TODO IGOR DAVID
-    // figure out if any of the below should be moved into recordData
-    if (rawValue === undefined) {
-      let attrAlias = this._schema.getAttributeAlias(this._modelName, key);
-      if (attrAlias) {
-        const cp = readOnly(attrAlias);
-        defineProperty(this, key, cp);
-        return get(this, key);
+        let defaultValue = this._schema.getDefaultValue(this._modelName, key);
+
+        // If default value is not defined, resolve the key for reference
+        if (defaultValue !== undefined) {
+          returnValue = this._cache[key] = defaultValue;
+        }
       }
-
-      let defaultValue = this._schema.getDefaultValue(this._modelName, key);
-
-      // If default value is not defined, resolve the key for reference
-      if (defaultValue !== undefined) {
-        return (this._cache[key] = defaultValue);
+      if (returnValue === undefined) {
+        returnValue = resolveValue(key, rawValue, this._modelName, this._store, this._schema, this);
+        this._cache[key] = returnValue;
       }
     }
-
-    return (this._cache[key] = resolveValue(
-      key,
-      rawValue,
-      this._modelName,
-      this._store,
-      this._schema,
-      this
-    ));
+    return returnValue;
   }
 
   get id() {
@@ -587,18 +667,34 @@ export default class MegamorphicModel extends EmberObject {
     schemaInterface._suppressNotifications = priorSuppressNotifications;
 
     const hasDirtyAttr = recordData.hasChangedAttributes();
-    const isDirty = get(this, 'isDirty');
+    if (CUSTOM_MODEL_CLASS) {
+      const cachedIsDirty = this._topModel._isDirty;
 
-    if (hasDirtyAttr && !isDirty) {
-      this._updateCurrentState(!CUSTOM_MODEL_CLASS && updatedUncommitted);
-    } else if (!hasDirtyAttr && isDirty) {
-      this._updateCurrentState(!CUSTOM_MODEL_CLASS && loadedSaved);
+      // `isDirty` cached value does not match our current one -> we need to update our state
+      if (hasDirtyAttr !== cachedIsDirty) {
+        this._updateCurrentState();
+      }
+    } else {
+      const isDirty = get(this, 'isDirty');
+
+      if (hasDirtyAttr && !isDirty) {
+        this._updateCurrentState(updatedUncommitted);
+      } else if (!hasDirtyAttr && isDirty) {
+        this._updateCurrentState(loadedSaved);
+      }
     }
   }
 
   _removeError(key) {
+    // Skip if `useUnderlyingErrorsValue` returns true meaning we are treating `errors` as an
+    // attribute from the payload
+    if (this._schema.useUnderlyingErrorsValue(this._modelName)) {
+      return;
+    }
+
     // Remove errors for the property
     this.errors.remove(key);
+
     if (CUSTOM_MODEL_CLASS) {
       if (get(this.errors, 'length') === 0) {
         this._clearInvalidRequestErrors();
@@ -631,10 +727,23 @@ export default class MegamorphicModel extends EmberObject {
   // Errors hash that will get update,
   // upon validation errors
   get errors() {
-    if (this._errors === null) {
+    if (this._schema.useUnderlyingErrorsValue(this._modelName)) {
+      return this.unknownProperty('errors');
+    } else if (this._errors === null) {
       this._errors = Errors.create();
     }
     return this._errors;
+  }
+
+  set errors(value) {
+    if (this._schema.useUnderlyingErrorsValue(this._modelName)) {
+      this.setUnknownProperty('errors', value);
+    } else {
+      this._errors.clear();
+      for (const error of value) {
+        this._errors.pushObject(error);
+      }
+    }
   }
 }
 
@@ -645,12 +754,12 @@ MegamorphicModel.prototype._parentModel = null;
 MegamorphicModel.prototype._topModel = null;
 MegamorphicModel.prototype._errors = null;
 MegamorphicModel.prototype._invalidRequests = null;
-MegamorphicModel.prototype._errorRequests = null;
-MegamorphicModel.prototype._lastErrorRequest = null;
 MegamorphicModel.prototype.currentState = null;
 MegamorphicModel.prototype.isError = null;
 MegamorphicModel.prototype.adapterError = null;
 MegamorphicModel.prototype._identifier = null;
+MegamorphicModel.prototype._isDirty = null;
+MegamorphicModel.prototype._oldWillDestroy = null;
 
 MegamorphicModel.relationshipsByName = new Map();
 
@@ -690,14 +799,18 @@ if (CUSTOM_MODEL_CLASS) {
 let isDirty;
 if (CUSTOM_MODEL_CLASS) {
   isDirty = computed('_topModel.isDirty', function () {
-    if (this._topModel !== this) {
+    if (this !== this._topModel) {
       return this._topModel.get('isDirty');
     }
-    return (
+
+    // We cache the `_isDirty` value so that we can use it in deciding whether to notify a property change
+    // without having to consume `isDirty` to avoid rerender loops and get a perf boost
+    this._isDirty =
       this._recordData.hasChangedAttributes() ||
       ((this._recordData.isNew() || this._recordData.isDeleted()) &&
-        this._recordData.isNew() !== this._recordData.isDeleted())
-    );
+        !this._recordData.isDeletionCommitted());
+
+    return this._isDirty;
   });
 } else {
   isDirty = retrieveFromCurrentState;
@@ -771,8 +884,8 @@ if (CUSTOM_MODEL_CLASS) {
 }
 
 // STATE PROPS
-defineProperty(MegamorphicModel.prototype, 'isLoading', isLoaded);
-defineProperty(MegamorphicModel.prototype, 'isLoaded', isLoading);
+defineProperty(MegamorphicModel.prototype, 'isLoading', isLoading);
+defineProperty(MegamorphicModel.prototype, 'isLoaded', isLoaded);
 defineProperty(MegamorphicModel.prototype, 'dirtyType', dirtyType);
 
 defineProperty(MegamorphicModel.prototype, 'isDirty', isDirty);
@@ -801,15 +914,17 @@ export class EmbeddedMegamorphicModel extends MegamorphicModel {
   }
 
   _updateCurrentState(state) {
-    if (state === loadedSaved) {
-      let topRecordData = recordDataFor(this._topModel);
-      if (topRecordData.hasChangedAttributes()) {
-        // Nested models maintain state with their parents; this makes sense
-        // until we let people save nested models independently.  However, it
-        // means that nested models should not reset their parents to "not
-        // dirty" when their last changed attribute is set to its original
-        // value, if their parent has some other dirty attribute
-        return;
+    if (!CUSTOM_MODEL_CLASS) {
+      if (state === loadedSaved) {
+        let topRecordData = recordDataFor(this._topModel);
+        if (topRecordData.hasChangedAttributes()) {
+          // Nested models maintain state with their parents; this makes sense
+          // until we let people save nested models independently.  However, it
+          // means that nested models should not reset their parents to "not
+          // dirty" when their last changed attribute is set to its original
+          // value, if their parent has some other dirty attribute
+          return;
+        }
       }
     }
     return super._updateCurrentState(state);
@@ -834,6 +949,16 @@ export class EmbeddedMegamorphicModel extends MegamorphicModel {
   serialize(options) {
     return this._store.serializerFor('-ember-m3').serialize(new EmbeddedSnapshot(this), options);
   }
+}
+
+if (CUSTOM_MODEL_CLASS) {
+  defineProperty(
+    EmbeddedMegamorphicModel.prototype,
+    'isSaving',
+    computed('_topModel.isSaving', function () {
+      return this._topModel.isSaving;
+    }).readOnly()
+  );
 }
 
 export class EmbeddedSnapshot {

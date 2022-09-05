@@ -1,6 +1,7 @@
 import { module, test } from 'qunit';
 import { setupTest } from 'ember-qunit';
 import DefaultSchema from 'ember-m3/services/m3-schema';
+import { DEBUG } from '@glimmer/env';
 
 module('unit/schema-manager', function (hooks) {
   setupTest(hooks);
@@ -147,24 +148,26 @@ module('unit/schema-manager', function (hooks) {
     );
   });
 
-  test('computeBaseModelName asserts the input is not returned', function (assert) {
-    this.registerSchema(
-      class TestSchema extends DefaultSchema {
-        computeBaseModelName(/* modelName */) {
-          return 'com.example.BaseType';
+  if (DEBUG) {
+    test('computeBaseModelName asserts the input is not returned', function (assert) {
+      this.registerSchema(
+        class TestSchema extends DefaultSchema {
+          computeBaseModelName(/* modelName */) {
+            return 'com.example.BaseType';
+          }
         }
-      }
-    );
+      );
 
-    assert.equal(
-      this.schemaManager.computeBaseModelName('x'),
-      'com.example.BaseType',
-      'computeBaseModel(projection)'
-    );
-    assert.throws(() => {
-      this.schemaManager.computeBaseModelName('com.example.BaseType');
-    }, /projection cycle/);
-  });
+      assert.equal(
+        this.schemaManager.computeBaseModelName('x'),
+        'com.example.BaseType',
+        'computeBaseModel(projection)'
+      );
+      assert.throws(() => {
+        this.schemaManager.computeBaseModelName('com.example.BaseType');
+      }, /projection cycle/);
+    });
+  }
 
   test('detects when schema has not defined a computeAttribute hook', function (assert) {
     this.registerSchema(
@@ -215,5 +218,42 @@ module('unit/schema-manager', function (hooks) {
       })
     );
     assert.equal(this.schemaManager.useComputeAttribute(), true);
+  });
+
+  test("schema's useUnderlyingErrorsValue returns true", function (assert) {
+    this.registerSchema(
+      class TestSchema extends DefaultSchema {
+        useUnderlyingErrorsValue(modelName) {
+          assert.equal(
+            modelName,
+            'com.example.bookstore.Book',
+            "model name is passed to schema's useUnderlyingErrorsValue function"
+          );
+          return true;
+        }
+      }
+    );
+    assert.equal(this.schemaManager.useUnderlyingErrorsValue('com.example.bookstore.Book'), true);
+  });
+
+  test("schema's useUnderlyingErrorsValue returns false", function (assert) {
+    this.registerSchema(
+      class TestSchema extends DefaultSchema {
+        useUnderlyingErrorsValue(modelName) {
+          assert.equal(
+            modelName,
+            'com.example.bookstore.Book',
+            "model name is passed to schema's useUnderlyingErrorsValue function"
+          );
+          return false;
+        }
+      }
+    );
+    assert.equal(this.schemaManager.useUnderlyingErrorsValue('com.example.bookstore.Book'), false);
+  });
+
+  test("schema's default useUnderlyingErrorsValue function call as false", function (assert) {
+    this.registerSchema(DefaultSchema);
+    assert.equal(this.schemaManager.useUnderlyingErrorsValue(), false);
   });
 });

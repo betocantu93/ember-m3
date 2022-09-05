@@ -1,3 +1,4 @@
+import { DEBUG } from '@glimmer/env';
 import { module, test, skip } from 'qunit';
 import EmberObject, { get, set } from '@ember/object';
 import { run } from '@ember/runloop';
@@ -10,6 +11,7 @@ import {
   PUBLISHER_CLASS,
   PROJECTED_PUBLISHER_CLASS,
 } from './common';
+import { CUSTOM_MODEL_CLASS } from 'ember-m3/-infra/features';
 
 for (let { name, setupTest } of setupTestPerSchema()) {
   module(`unit/projections/writing: ${name}`, function (hooks) {
@@ -117,15 +119,20 @@ for (let { name, setupTest } of setupTestPerSchema()) {
         this.store.createRecord(BOOK_PREVIEW_PROJECTION_CLASS_PATH, {
           id: BOOK_ID,
         });
-        assert.expectAssertion(
-          () => {
-            this.store.createRecord(BOOK_PREVIEW_PROJECTION_CLASS_PATH, {
-              id: BOOK_ID,
-            });
-          },
-          /has already been used/,
-          'Expected create record for same projection and ID to throw an error'
-        );
+
+        if (DEBUG) {
+          assert.throws(
+            () => {
+              this.store.createRecord(BOOK_PREVIEW_PROJECTION_CLASS_PATH, {
+                id: BOOK_ID,
+              });
+            },
+            /has already been used/,
+            'Expected create record for same projection and ID to throw an error'
+          );
+        } else {
+          assert.ok(true, 'no assertions happen in production builds');
+        }
       });
     });
 
@@ -442,6 +449,210 @@ for (let { name, setupTest } of setupTestPerSchema()) {
         'The projection should be dirty after mutating its state'
       );
     });
+
+    if (CUSTOM_MODEL_CLASS) {
+      test('Projections share the deleted value with the base model', function (assert) {
+        let projectedExcerpt = this.store.push({
+          data: {
+            id: BOOK_ID,
+            type: BOOK_EXCERPT_PROJECTION_CLASS_PATH,
+            attributes: {
+              title: BOOK_TITLE_1,
+              author: {
+                name: BOOK_AUTHOR_NAME_1,
+              },
+            },
+          },
+        });
+
+        let projectedPreview = this.store.push({
+          data: {
+            id: BOOK_ID,
+            type: BOOK_PREVIEW_PROJECTION_CLASS_PATH,
+            attributes: {},
+          },
+        });
+        // Base record
+        let baseRecord = this.store.push({
+          data: {
+            id: BOOK_ID,
+            type: BOOK_CLASS_PATH,
+            attributes: {
+              title: BOOK_TITLE_1,
+            },
+          },
+        });
+
+        // We need to get the `isDeleted` and `isDirty` values at the start so we can assert that they invalidate properly
+        assert.equal(baseRecord.get('isDeleted'), false, 'The base model starts off not deleted');
+        assert.equal(
+          projectedExcerpt.get('isDeleted'),
+          false,
+          'The first projection starts off non deleted'
+        );
+        assert.equal(
+          projectedPreview.get('isDeleted'),
+          false,
+          'The other projection starts off not deleted'
+        );
+        assert.equal(
+          projectedExcerpt.get('isDirty'),
+          false,
+          'The first projection starts off not dirty'
+        );
+        assert.equal(baseRecord.get('isDirty'), false, 'The base model starts off not dirty');
+        assert.equal(
+          projectedPreview.get('isDirty'),
+          false,
+          'The other projection starts off not deleted'
+        );
+
+        projectedExcerpt.deleteRecord();
+
+        assert.equal(
+          projectedExcerpt.get('isDeleted'),
+          true,
+          'The projection is in a deleted state'
+        );
+        assert.equal(baseRecord.get('isDeleted'), true, 'The base model is also deleted');
+        assert.equal(projectedPreview.get('isDeleted'), true, 'The other projection is deleted');
+
+        assert.equal(projectedExcerpt.get('isDirty'), true, 'The projection is in a dirty state');
+        assert.equal(baseRecord.get('isDirty'), true, 'The base model is also dirty');
+        assert.equal(
+          projectedPreview.get('isDirty'),
+          true,
+          'The other projection is also in a dirty state'
+        );
+
+        projectedExcerpt.rollbackAttributes();
+
+        assert.equal(
+          projectedExcerpt.get('isDeleted'),
+          false,
+          'The projection has been rolled back'
+        );
+        assert.equal(baseRecord.get('isDeleted'), false, 'The base model has been rolled back');
+        assert.equal(
+          projectedPreview.get('isDeleted'),
+          false,
+          'The other projection has been rolled back'
+        );
+
+        assert.equal(
+          projectedExcerpt.get('isDirty'),
+          false,
+          'The first projection is no longer dirty'
+        );
+        assert.equal(baseRecord.get('isDirty'), false, 'The base model is no longer dirty');
+        assert.equal(
+          projectedPreview.get('isDirty'),
+          false,
+          'The other projection is no longer dirty'
+        );
+      });
+
+      test('Base models share the deleted value with the projections', function (assert) {
+        let projectedExcerpt = this.store.push({
+          data: {
+            id: BOOK_ID,
+            type: BOOK_EXCERPT_PROJECTION_CLASS_PATH,
+            attributes: {
+              title: BOOK_TITLE_1,
+              author: {
+                name: BOOK_AUTHOR_NAME_1,
+              },
+            },
+          },
+        });
+        // Base record
+        let baseRecord = this.store.push({
+          data: {
+            id: BOOK_ID,
+            type: BOOK_CLASS_PATH,
+            attributes: {
+              title: BOOK_TITLE_1,
+            },
+          },
+        });
+
+        let projectedPreview = this.store.push({
+          data: {
+            id: BOOK_ID,
+            type: BOOK_PREVIEW_PROJECTION_CLASS_PATH,
+            attributes: {},
+          },
+        });
+
+        assert.equal(baseRecord.get('isDeleted'), false, 'The base model starts off not deleted');
+        assert.equal(
+          projectedExcerpt.get('isDeleted'),
+          false,
+          'The projection starts off non deleted'
+        );
+        assert.equal(
+          projectedPreview.get('isDeleted'),
+          false,
+          'The other projection starts off not deleted'
+        );
+
+        assert.equal(
+          projectedExcerpt.get('isDirty'),
+          false,
+          'The first projection starts off not dirty'
+        );
+        assert.equal(baseRecord.get('isDirty'), false, 'The base model starts off not dirty');
+        assert.equal(
+          projectedPreview.get('isDirty'),
+          false,
+          'The other projection starts off not deleted'
+        );
+
+        baseRecord.deleteRecord();
+
+        assert.equal(
+          projectedExcerpt.get('isDeleted'),
+          true,
+          'The projection is in a deleted state'
+        );
+        assert.equal(baseRecord.get('isDeleted'), true, 'The base model is also deleted');
+        assert.equal(projectedPreview.get('isDeleted'), true, 'The other projection is deleted');
+
+        assert.equal(projectedExcerpt.get('isDirty'), true, 'The projection is in a dirty state');
+        assert.equal(baseRecord.get('isDirty'), true, 'The base model is also dirty');
+        assert.equal(
+          projectedPreview.get('isDirty'),
+          true,
+          'The other projection is also in a dirty state'
+        );
+
+        baseRecord.rollbackAttributes();
+
+        assert.equal(
+          projectedExcerpt.get('isDeleted'),
+          false,
+          'The projection has been rolled back'
+        );
+        assert.equal(baseRecord.get('isDeleted'), false, 'The base model has been rolled back');
+        assert.equal(
+          projectedPreview.get('isDeleted'),
+          false,
+          'The other projection has been rolled back'
+        );
+
+        assert.equal(
+          projectedExcerpt.get('isDirty'),
+          false,
+          'The first projection is no longer dirty'
+        );
+        assert.equal(baseRecord.get('isDirty'), false, 'The base model is no longer dirty');
+        assert.equal(
+          projectedPreview.get('isDirty'),
+          false,
+          'The other projection is no longer dirty'
+        );
+      });
+    }
 
     test('.debugJSON returns expected JSON for projections', function (assert) {
       const expectedJSON = {

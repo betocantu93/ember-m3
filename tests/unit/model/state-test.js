@@ -1,10 +1,15 @@
 import { module, test, skip } from 'qunit';
-import { setupTest } from 'ember-qunit';
-
+import { setupTest, setupRenderingTest } from 'ember-qunit';
 import { run } from '@ember/runloop';
 import { isArray } from '@ember/array';
-
+import Component from '@ember/component';
+import { hbs } from 'ember-cli-htmlbars';
+import { render } from '@ember/test-helpers';
+import { gte } from 'ember-compatibility-helpers';
+import propGet from '../../helpers/prop-get';
 import DefaultSchema from 'ember-m3/services/m3-schema';
+import { CUSTOM_MODEL_CLASS } from 'ember-m3/-infra/features';
+import HAS_NATIVE_PROXY from 'ember-m3/utils/has-native-proxy';
 
 let computeNestedModel = function computeNestedModel(key, value) {
   if (value && typeof value === 'object' && !isArray(value)) {
@@ -85,6 +90,15 @@ class TestSchemaOldHooks extends DefaultSchema {
   }
 }
 
+if ((gte('@ember-data/model', '3.28.0') || gte('ember-data', '3.28.0')) && HAS_NATIVE_PROXY) {
+  TestSchemaOldHooks.prototype.useNativeProperties = function () {
+    return true;
+  };
+  TestSchema.prototype.useNativeProperties = function () {
+    return true;
+  };
+}
+
 for (let testRun = 0; testRun < 2; testRun++) {
   module(
     `unit/model/state with ${testRun === 0 ? 'old hooks' : 'with computeAttribute'}`,
@@ -101,10 +115,63 @@ for (let testRun = 0; testRun < 2; testRun++) {
       });
 
       skip('isEmpty', function () {});
-      skip('isLoading', function () {});
-      skip('isLoaded', function () {});
+      // There is no way to observe this in the true state
+      test('isLoading', function (assert) {
+        let data = {
+          data: {
+            id: 1,
+            type: 'com.example.bookstore.Book',
+            attributes: {
+              title: 'The Storm Before the Storm',
+              author: 'Mike Duncan',
+            },
+          },
+        };
+
+        let record = this.store.push(data);
+        assert.equal(propGet(record, 'isLoading'), false, 'record is not loading');
+      });
+
+      // There is no way to observe this in the false state
+      test('isLoaded', function (assert) {
+        let data = {
+          data: {
+            id: 1,
+            type: 'com.example.bookstore.Book',
+            attributes: {
+              title: 'The Storm Before the Storm',
+              author: 'Mike Duncan',
+            },
+          },
+        };
+
+        let record = this.store.push(data);
+        assert.equal(propGet(record, 'isLoaded'), true, 'record is loaded');
+      });
       skip('isSaving', function () {});
-      skip('isDeleted', function () {});
+      test('isDeleted', function (assert) {
+        let data = {
+          data: {
+            id: 1,
+            type: 'com.example.bookstore.Book',
+            attributes: {
+              title: 'The Storm Before the Storm',
+              author: 'Mike Duncan',
+            },
+          },
+        };
+        let record = this.store.push(data);
+        assert.equal(propGet(record, 'isDeleted'), false, 'record starts off not deleted');
+        record.deleteRecord();
+        assert.equal(propGet(record, 'isDeleted'), true, 'record is now deleted');
+        record.rollbackAttributes();
+        assert.equal(
+          propGet(record, 'isDeleted'),
+          false,
+          'after rollbackAttributes record is no longer deleted'
+        );
+      });
+
       skip('isValid', function () {});
 
       test('isNew', function (assert) {
@@ -121,18 +188,22 @@ for (let testRun = 0; testRun < 2; testRun++) {
           })
         );
 
-        assert.equal(existingRecord.get('isNew'), false, 'existingRecord.isNew');
+        assert.equal(propGet(existingRecord, 'isDeleted'), false, 'existingRecord.isNew');
 
         existingRecord.deleteRecord();
 
-        assert.equal(existingRecord.get('isDirty'), true, 'existingRecor.delete() -> isDirty');
+        assert.equal(
+          propGet(existingRecord, 'isDeleted'),
+          true,
+          'existingRecord.delete() -> isDirty'
+        );
 
         let newRecord = this.store.createRecord('com.example.bookstore.Book', {
           title: 'Something is Going On',
           author: 'Just Some Friendly Guy',
         });
 
-        assert.equal(newRecord.get('isNew'), true, 'newRecord.isNew');
+        assert.equal(propGet(newRecord, 'isNew'), true, 'newRecord.isNew');
 
         newRecord.deleteRecord();
 
@@ -157,43 +228,140 @@ for (let testRun = 0; testRun < 2; testRun++) {
           });
         });
 
-        assert.equal(record.get('isDirty'), false, 'record not dirty');
-        assert.equal(record.get('rating.isDirty'), false, 'nested record not dirty');
+        assert.equal(propGet(record, 'isDirty'), false, 'record not dirty');
+        assert.equal(
+          propGet(propGet(record, 'rating'), 'isDirty'),
+          false,
+          'nested record not dirty'
+        );
 
         record.set('author', 'Nobody yet');
 
-        assert.equal(record.get('isDirty'), true, 'record dirty');
+        assert.equal(propGet(record, 'isDirty'), true, 'record dirty');
         assert.equal(
-          record.get('rating.isDirty'),
+          propGet(propGet(record, 'rating'), 'isDirty'),
           true,
           'nested record shares dirty state with parent'
         );
 
         record.rollbackAttributes();
 
-        assert.equal(record.get('isDirty'), false, 'record no longer dirty');
-        assert.equal(record.get('rating.isDirty'), false, 'nested record no longer dirty');
+        assert.equal(propGet(record, 'isDirty'), false, 'record no longer dirty');
+        assert.equal(
+          propGet(propGet(record, 'rating'), 'isDirty'),
+          false,
+          'nested record no longer dirty'
+        );
 
         record.set('rating.avg', 11);
 
-        assert.equal(record.get('isDirty'), true, 'record shares state with nested record');
-        assert.equal(record.get('rating.isDirty'), true, 'nested record dirty');
+        assert.equal(propGet(record, 'isDirty'), true, 'record shares state with nested record');
+        assert.equal(propGet(propGet(record, 'rating'), 'isDirty'), true, 'nested record dirty');
 
         record.rollbackAttributes();
 
         record.set('name', 'The Winds of Never Published');
-        assert.equal(record.get('isDirty'), true, 'record is dirty from outside nested record');
+        assert.equal(
+          propGet(record, 'isDirty'),
+          true,
+          'record is dirty from outside nested record'
+        );
 
         record.set('rating.avg', 11);
-        assert.equal(record.get('rating.isDirty'), true, 'nested record dirty from its own attr');
+        assert.equal(
+          propGet(propGet(record, 'rating'), 'isDirty'),
+          true,
+          'nested record dirty from its own attr'
+        );
 
         record.set('rating.avg', 10);
         assert.equal(
-          record.get('isDirty'),
+          propGet(record, 'isDirty'),
           true,
           'record is not un-dirtied from resetting nested value'
         );
       });
     }
   );
+}
+
+if (gte('3.24.0')) {
+  module('unit/model/state with rendering', function (hooks) {
+    setupRenderingTest(hooks);
+
+    hooks.beforeEach(function () {
+      this.owner.register('service:m3-schema', TestSchema);
+      this.store = this.owner.lookup('service:store');
+    });
+
+    test('updating isDirty flag does not cause rerenders', async function (assert) {
+      this.owner.register(
+        'component:show-dirtyness',
+        class ShowDirtyness extends Component {
+          layout = hbs`
+          {{#if this.myBook.isDirty}}
+            Book is dirty
+          {{/if}}
+      `;
+
+          get myBook() {
+            this.book.get('rating').set('property', 'prop');
+            return this.book;
+          }
+        }
+      );
+
+      let book = this.store.push({
+        data: {
+          id: 1,
+          type: 'com.example.bookstore.Book',
+          attributes: {
+            name: 'The Winds of Winter',
+            author: 'George R. R. Martin',
+            rating: {
+              avg: 10,
+            },
+          },
+        },
+      });
+
+      this.set('book', book);
+      book.get('isDirty');
+
+      await render(hbs`
+        {{show-dirtyness book=this.book}}
+      `);
+
+      assert.equal(this.element.innerText.trim(), 'Book is dirty', 'Book renders as dirty');
+    });
+
+    if (CUSTOM_MODEL_CLASS && HAS_NATIVE_PROXY) {
+      test('creating a record does not cause rerenders from reading `isDirty` when key values are undefined', async function (assert) {
+        this.owner.register(
+          'component:show-dirtyness',
+          class ShowDirtyness extends Component {
+            layout = hbs`
+          {{#if this.myBook.isDirty}}
+            Book is dirty
+          {{/if}}
+      `;
+
+            get myBook() {
+              // Passing `{ someKey: undefined }` will trigger a property change on the newly created model, but will not dirty the properties
+              // If we are not careful we could create a rerender cycle by notifying `isDirty` change on a record in the middle of instantiation
+              return this.store.createRecord('com.example.bookstore.book', { someKey: undefined });
+            }
+          }
+        );
+
+        this.set('store', this.store);
+
+        await render(hbs`
+        {{show-dirtyness store=this.store}}
+      `);
+
+        assert.equal(this.element.innerText, 'Book is dirty', 'Book renders as dirty');
+      });
+    }
+  });
 }
